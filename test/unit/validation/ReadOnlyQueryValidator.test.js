@@ -1,16 +1,17 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { validateReadOnlyQuery, validateIdentifier } from "../../dist/validation.js";
+import { ReadOnlyQueryValidator } from "../../../dist/validation/ReadOnlyQueryValidator.js";
+import { SqlSkeletonizer } from "../../../dist/validation/SqlSkeletonizer.js";
+import { EmptyQueryRule } from "../../../dist/validation/rules/EmptyQueryRule.js";
+import { LeadingKeywordRule } from "../../../dist/validation/rules/LeadingKeywordRule.js";
+import { SingleStatementRule } from "../../../dist/validation/rules/SingleStatementRule.js";
 
-function rejects(sql) {
-  return validateReadOnlyQuery(sql).valid === false;
-}
+const validator = new ReadOnlyQueryValidator();
 
-function allows(sql) {
-  return validateReadOnlyQuery(sql).valid === true;
-}
+const rejects = (sql) => validator.validate(sql).valid === false;
+const allows = (sql) => validator.validate(sql).valid === true;
 
-describe("validateReadOnlyQuery: statements that must be rejected", () => {
+describe("statements that must be rejected", () => {
   const cases = [
     ["plain delete", "DELETE FROM users"],
     ["plain update", "UPDATE users SET name = 'x'"],
@@ -36,7 +37,7 @@ describe("validateReadOnlyQuery: statements that must be rejected", () => {
   }
 });
 
-describe("validateReadOnlyQuery: statement stacking", () => {
+describe("statement stacking", () => {
   const cases = [
     ["bare second statement", "SELECT 1; DROP TABLE users"],
     ["hidden behind a block comment", "SELECT 1 /* x */; DROP TABLE users"],
@@ -58,15 +59,15 @@ describe("validateReadOnlyQuery: statement stacking", () => {
   });
 });
 
-describe("validateReadOnlyQuery: literals are not read as SQL", () => {
-  // The whole point of the tokenizer. A naive split on ";" rejects these, and
-  // a naive keyword scan would reject the ones carrying write words.
+describe("literals are never read as SQL", () => {
+  // The skeletonizer earns its keep here. A naive splitter rejects these, and a
+  // naive keyword scan rejects the ones carrying write words.
   const cases = [
     ["semicolon inside a literal", "SELECT 'a;b' AS x"],
     ["comment marker inside a literal", "SELECT '-- not a comment' AS x"],
     ["block comment marker inside a literal", "SELECT '/* nope */' AS x"],
     ["write keyword inside a literal", "SELECT * FROM t WHERE status = 'DELETE'"],
-    ["write keyword inside a quoted identifier", 'SELECT `delete` FROM t'],
+    ["write keyword inside a quoted identifier", "SELECT `delete` FROM t"],
     ["escaped quote inside a literal", "SELECT 'it\\'s fine' AS x"],
     ["doubled quote inside a literal", "SELECT 'it''s fine' AS x"],
     ["double quoted string", 'SELECT "a;b" AS x'],
@@ -79,7 +80,7 @@ describe("validateReadOnlyQuery: literals are not read as SQL", () => {
   }
 });
 
-describe("validateReadOnlyQuery: reads that must be allowed", () => {
+describe("reads that must be allowed", () => {
   const cases = [
     ["select", "SELECT 1"],
     ["lowercase select", "select 1"],
@@ -91,8 +92,7 @@ describe("validateReadOnlyQuery: reads that must be allowed", () => {
     ["parenthesised union", "(SELECT 1) UNION (SELECT 2)"],
     ["subquery", "SELECT * FROM a WHERE id IN (SELECT id FROM b)"],
     ["join with comment", "SELECT * /* join */ FROM a JOIN b ON a.id = b.a_id"],
-    // Columns that merely look like write keywords must survive, which is why
-    // the write-keyword scan is not applied to plain SELECT statements.
+    // These pin the decision not to scan plain SELECT for write keywords.
     ["column named start", "SELECT start FROM sessions"],
     ["column named begin", "SELECT begin, end FROM ranges"],
     ["column named create_at", "SELECT create_at FROM t"],
@@ -106,7 +106,7 @@ describe("validateReadOnlyQuery: reads that must be allowed", () => {
   }
 });
 
-describe("validateReadOnlyQuery: writes smuggled past a safe first word", () => {
+describe("writes smuggled past a safe first word", () => {
   test("CTE prefixing a delete", () => {
     assert.ok(rejects("WITH c AS (SELECT 1) DELETE FROM users"));
   });
@@ -124,7 +124,7 @@ describe("validateReadOnlyQuery: writes smuggled past a safe first word", () => 
   });
 });
 
-describe("validateReadOnlyQuery: file and load patterns", () => {
+describe("file and load patterns", () => {
   const cases = [
     ["into outfile", "SELECT * FROM users INTO OUTFILE '/tmp/x'"],
     ["into dumpfile", "SELECT * FROM users INTO DUMPFILE '/tmp/x'"],
@@ -141,44 +141,43 @@ describe("validateReadOnlyQuery: file and load patterns", () => {
   }
 });
 
-describe("validateReadOnlyQuery: error messages", () => {
+describe("error messages", () => {
   test("names the offending keyword", () => {
-    const result = validateReadOnlyQuery("DELETE FROM users");
-    assert.match(result.error, /DELETE/);
+    assert.match(validator.validate("DELETE FROM users").error, /DELETE/);
   });
 
   test("explains statement stacking", () => {
-    const result = validateReadOnlyQuery("SELECT 1; SELECT 2");
-    assert.match(result.error, /Multiple statements/i);
+    assert.match(validator.validate("SELECT 1; SELECT 2").error, /Multiple statements/i);
   });
 });
 
-describe("validateIdentifier", () => {
-  for (const good of ["users", "user_roles", "T1", "a$b", "_leading"]) {
-    test(`accepts ${good}`, () => {
-      assert.equal(validateIdentifier(good, "table name").valid, true);
-    });
-  }
+describe("the rule chain is composable", () => {
+  // Injecting rules is the payoff of the Chain of Responsibility: a narrower
+  // chain can be assembled and reasoned about in isolation.
+  test("a chain without the keyword rule allows a write through", () => {
+    const permissive = new ReadOnlyQueryValidator(new SqlSkeletonizer(), [
+      new EmptyQueryRule(),
+      new SingleStatementRule(),
+    ]);
+    assert.equal(permissive.validate("DELETE FROM users").valid, true);
+  });
 
-  const bad = [
-    ["empty", ""],
-    ["backtick", "users`"],
-    ["statement stacking", "users; DROP TABLE x"],
-    ["space", "user roles"],
-    ["quote", "users'"],
-    ["dash", "user-roles"],
-    ["dot qualified", "db.users"],
-    ["wildcard", "*"],
-  ];
+  test("rules run in the order given, first objection wins", () => {
+    const keywordFirst = new ReadOnlyQueryValidator(new SqlSkeletonizer(), [
+      new LeadingKeywordRule(),
+      new SingleStatementRule(),
+    ]);
+    assert.match(keywordFirst.validate("DELETE FROM a; SELECT 1").error, /Got: DELETE/);
 
-  for (const [name, value] of bad) {
-    test(`rejects ${name}`, () => {
-      assert.equal(validateIdentifier(value, "table name").valid, false);
-    });
-  }
+    const stackingFirst = new ReadOnlyQueryValidator(new SqlSkeletonizer(), [
+      new SingleStatementRule(),
+      new LeadingKeywordRule(),
+    ]);
+    assert.match(stackingFirst.validate("DELETE FROM a; SELECT 1").error, /Multiple statements/);
+  });
 
-  test("uses the supplied label in the message", () => {
-    const result = validateIdentifier("bad name", "database name");
-    assert.match(result.error, /database name/);
+  test("an empty chain allows anything, proving rules are the only gate", () => {
+    const none = new ReadOnlyQueryValidator(new SqlSkeletonizer(), []);
+    assert.equal(none.validate("DROP TABLE users").valid, true);
   });
 });

@@ -1,0 +1,38 @@
+import type { ZodRawShape } from "zod";
+import { BaseTool } from "../BaseTool.js";
+import { ConnectionManager } from "../../connections/ConnectionManager.js";
+import { ToolResponse } from "../../formatting/ToolResponse.js";
+import type { ToolResult } from "../../types/tool.types.js";
+
+/**
+ * Lists the profiles available to switch to.
+ *
+ * Shows each profile's origin, because `(env)` versus `(session)` tells the
+ * reader whether the connection will still be there after a restart.
+ */
+export class ListConnectionsTool extends BaseTool {
+  public readonly name = "list_connections";
+  public readonly description =
+    "List the connection profiles available to switch to, including any added during this session";
+  public readonly inputSchema: ZodRawShape = {};
+
+  constructor(private readonly connections: ConnectionManager) {
+    super();
+  }
+
+  protected async execute(): Promise<ToolResult> {
+    const profiles = this.connections.listProfiles();
+
+    if (profiles.length === 0) {
+      return ToolResponse.text("No profiles configured. Use connect to open one directly.");
+    }
+
+    const activeName = this.connections.getActiveName();
+    // The profile renders its own line, including the "* " active marker, so
+    // the display rule lives with the entity rather than being duplicated by
+    // every caller that wants to show a profile.
+    const lines = profiles.map((profile) => profile.describe(profile.name === activeName));
+
+    return ToolResponse.text(`Connection profiles:\n${lines.join("\n")}`);
+  }
+}
