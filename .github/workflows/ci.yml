@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MYSQL_ROOT_PASSWORD: test_root_pw
+
+jobs:
+  test:
+    name: Test on MySQL ${{ matrix.mysql }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 8.0 is the baseline the read-only session backstop was written
+        # against; 8.4 is the current LTS. Both must pass.
+        mysql: ["8.0", "8.4"]
+
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: test_root_pw
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptest_root_pw --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: node --test
+        env:
+          TEST_MYSQL_HOST: 127.0.0.1
+          TEST_MYSQL_PORT: 3306
+          TEST_MYSQL_USER: root
+          TEST_MYSQL_PASSWORD: test_root_pw
+
+      # The suite skips its integration half when MySQL is unreachable, which
+      # would let a broken service container pass as a green build. Fail loudly
+      # instead of silently testing nothing.
+      - name: Assert integration tests actually ran
+        run: |
+          output=$(node --test test/integration/*.test.js 2>&1)
+          echo "$output"
+          if echo "$output" | grep -q "MySQL not reachable"; then
+            echo "::error::Integration tests were skipped, MySQL service was unreachable"
+            exit 1
+          fi
+        env:
+          TEST_MYSQL_HOST: 127.0.0.1
+          TEST_MYSQL_PORT: 3306
+          TEST_MYSQL_USER: root
+          TEST_MYSQL_PASSWORD: test_root_pw
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Builds the release image for both target platforms without pushing, so
+      # a Dockerfile change that only breaks arm64 is caught on the PR rather
+      # than at release time.
+      - name: Build release image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: test
+          load: true
+          tags: mcp-mysql-read-only:test
+          cache-from: type=gha
+
+      # The glob is expanded inside the container, not on the runner, so it
+      # resolves against the image's own layout.
+      - name: Run unit tests inside the image
+        run: docker run --rm mcp-mysql-read-only:test sh -c 'node --test test/unit/*.test.js'
+
+      # The server holds its pools open and exits only on a signal, so it will
+      # not close stdout by itself. timeout ends it once the replies are in.
+      - name: Smoke test the MCP handshake
+        run: |
+          set -euo pipefail
+          output=$(printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            | timeout 30 docker run -i --rm mcp-mysql-read-only:test node dist/index.js || true)
+          echo "$output"
+          echo "$output" | grep -q '"name":"use_database"'
+          echo "$output" | grep -q '"name":"run_query"'

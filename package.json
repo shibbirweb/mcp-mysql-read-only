@@ -1,0 +1,45 @@
+{
+  "name": "mcp-mysql-read-only",
+  "version": "1.0.0",
+  "description": "A read-only MySQL MCP server whose database and connection can be switched at runtime, with no client restart.",
+  "license": "MIT",
+  "author": "Md. Shibbir Ahmed <shibbirweb@gmail.com>",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shibbirweb/mcp-mysql-read-only.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shibbirweb/mcp-mysql-read-only/issues"
+  },
+  "homepage": "https://github.com/shibbirweb/mcp-mysql-read-only#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mysql",
+    "read-only",
+    "claude",
+    "llm",
+    "database"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test",
+    "test:unit": "npm run build && node --test test/unit/*.test.js",
+    "test:integration": "npm run build && node --test test/integration/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "~1.12.1",
+    "mysql2": "~3.14.0",
+    "zod": "~3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2",
+    "@types/node": "~22.10.0"
+  }
+}
