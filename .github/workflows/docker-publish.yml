@@ -124,12 +124,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Sync the README to the Docker Hub description
+      # Publishes README.dockerhub.md, not README.md. Docker Hub does not
+      # render mermaid, so the main README's diagrams would appear as raw
+      # source, and it does not resolve relative links either.
+      - name: Sync the description to Docker Hub
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ env.IMAGE_NAME }}
+          readme-filepath: ./README.dockerhub.md
           short-description: "Read-only MySQL MCP server with runtime-switchable connections"
 
       - name: Summary

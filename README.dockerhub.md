@@ -1,10 +1,23 @@
+<!--
+  This file is the Docker Hub description, published by
+  .github/workflows/docker-publish.yml via `readme-filepath`.
+
+  It exists because Docker Hub does NOT render mermaid: a ```mermaid block
+  shows up as raw source. It also does not resolve relative links, so every
+  link here must be absolute.
+
+  Keep it in sync with README.md. Same content, with ASCII diagrams instead of
+  mermaid and the contributor sections reduced to pointers.
+-->
+
 # mcp-mysql-read-only
 
 [![CI](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml/badge.svg)](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml)
-[![Docker Hub](https://img.shields.io/docker/v/shibbirweb/mcp-mysql-read-only?label=docker%20hub&sort=semver)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only)
 [![Docker pulls](https://img.shields.io/docker/pulls/shibbirweb/mcp-mysql-read-only?style=flat)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only)
 [![Image size](https://img.shields.io/docker/image-size/shibbirweb/mcp-mysql-read-only/latest?style=flat&label=image%20size)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only/tags)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/shibbirweb/mcp-mysql-read-only/blob/master/LICENSE)
+
+**Source and full documentation: [github.com/shibbirweb/mcp-mysql-read-only](https://github.com/shibbirweb/mcp-mysql-read-only)**
 
 An [MCP](https://modelcontextprotocol.io) server that gives an AI assistant read-only access to MySQL, and lets it **change database, server and credentials mid-conversation without restarting the client**.
 
@@ -12,23 +25,36 @@ Most MySQL MCP servers read their connection from environment variables once at 
 
 Runs entirely in Docker. Nothing is installed on your machine.
 
-```mermaid
-flowchart LR
-    A["AI assistant<br/>Claude Desktop / Claude Code"]
-    B["mcp-mysql-read-only<br/>one container, whole session"]
-    C[("app_dev")]
-    D[("staging")]
-    E[("analytics")]
-    F[("any server<br/>reached with connect")]
-
-    A <-->|"MCP over stdio"| B
-    B -.->|"pooled per target"| C
-    B -.->|"pooled per target"| D
-    B -.->|"pooled per target"| E
-    B -.->|"opened at runtime"| F
+```text
+            +--------------------------------------+
+            |            AI assistant              |
+            |     Claude Desktop / Claude Code     |
+            +------------------+-------------------+
+                               |
+                        MCP over stdio
+                               |
+            +------------------v-------------------+
+            |       mcp-mysql-read-only            |
+            |    one container, whole session      |
+            +------------------+-------------------+
+                               |
+              pooled per target (one pool each)
+                               |
+        +--------------+-------+-------+----------------+
+        |              |               |                |
+        v              v               v                v
+   ( app_dev )    ( staging )   ( analytics )   ( any server,
+                                                  opened at runtime
+                                                  with `connect` )
 ```
 
 The container lives for the whole session, so the active connection is just state inside it. Switching selects a different pool rather than reconnecting, and switching back reuses a warm one.
+
+---
+
+## Supported tags
+
+`1.0.0`, `1.0`, `1`, `latest` — built for `linux/amd64` and `linux/arm64`.
 
 ---
 
@@ -92,9 +118,11 @@ Same shape, in `.mcp.json` at your project root:
 }
 ```
 
+Any MCP client that can launch a subprocess works the same way: Cursor, Windsurf, Zed, Cline, Continue, Goose, LibreChat, VS Code agent mode, or your own agent built on the MCP SDK.
+
 Restart the client once. After that you never need to restart it to change database.
 
-> Credentials in these files sit on disk in plain text. Prefer a MySQL account with only `SELECT` grants, and keep the file out of version control. See [Security](#security).
+> Credentials in these files sit on disk in plain text. Prefer a MySQL account with only `SELECT` grants, and keep the file out of version control. See **Security** below.
 
 ---
 
@@ -113,41 +141,32 @@ Just ask. These map onto the connection tools:
 | A different server or credentials | No |
 | A new permanent profile in `MYSQL_PROFILES` | Yes, once |
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor You
-    participant A as Assistant
-    participant S as MCP server
-    participant M as MySQL
-
-    You->>A: "how many users in staging?"
-    A->>S: use_connection(staging)
-    S->>M: open + SELECT 1
-    M-->>S: ok
-    Note over S: verified, so the switch is committed
-    S-->>A: Switched to staging
-    A->>S: run_query(SELECT COUNT(*) ...)
-    S->>M: SELECT COUNT(*) ...
-    M-->>S: 4821
-    A-->>You: 4821 users in staging
-
-    You->>A: "and in production?"
-    Note over A,S: same session, no restart
-    A->>S: use_connection(production)
+```text
+  You: "how many users in staging?"
+    |
+    +--> assistant calls  use_connection(staging)
+    |       server opens the connection and runs SELECT 1
+    |       verified  ->  the switch is committed
+    |
+    +--> assistant calls  run_query(SELECT COUNT(*) ...)
+    |       -> 4821
+    |
+  You: "and in production?"
+    |
+    +--> assistant calls  use_connection(production)
+            same session, no restart
 ```
 
 A switch that fails verification is never committed, so the previous connection stays active and the session keeps working:
 
-```mermaid
-sequenceDiagram
-    participant S as MCP server
-    participant M as MySQL
-
-    S->>M: open "no_such_db" + SELECT 1
-    M-->>S: Unknown database
-    Note over S: active connection left untouched
-    S-->>S: Error: Unknown database 'no_such_db'
+```text
+  use_database("no_such_db")
+    |
+    +--> open + SELECT 1   ->   MySQL: Unknown database
+    |
+    +--> switch NOT committed
+            active connection unchanged, session still usable
+            returns: Error: Unknown database 'no_such_db'
 ```
 
 ### Named profiles
@@ -231,22 +250,35 @@ Starting profile: `MYSQL_DEFAULT_PROFILE` if it names a real profile, else `defa
 
 ## Security
 
-Two independent layers keep this read-only, so a hole in one is not automatically a write.
+Three independent layers keep this read-only, so a hole in one is not automatically a write.
 
-```mermaid
-flowchart TD
-    Q["run_query"] --> V{"SQL validator"}
-    V -->|"DELETE, DROP, stacked statements,<br/>write behind a CTE, INTO OUTFILE"| R1["rejected, no connection used"]
-    V -->|"reads only"| D{"mysql2 driver"}
-    D -->|"multipleStatements: false"| R2["a second statement<br/>cannot even be sent"]
-    D --> M{"MySQL session"}
-    M -->|"SET SESSION TRANSACTION READ ONLY"| R3["writes rejected by the server<br/>with error 1792"]
-    M -->|"read"| OK["rows returned"]
-
-    style R1 fill:#fde,stroke:#b55
-    style R2 fill:#fde,stroke:#b55
-    style R3 fill:#fde,stroke:#b55
-    style OK fill:#dfd,stroke:#5b5
+```text
+   run_query
+       |
+       v
+  +--------------------------------+
+  | 1. SQL validator               |
+  |    DELETE, DROP, stacked       |----> rejected
+  |    statements, a write behind  |      no connection is even used
+  |    a CTE, INTO OUTFILE         |
+  +--------------------------------+
+       | reads only
+       v
+  +--------------------------------+
+  | 2. mysql2 driver               |
+  |    multipleStatements: false   |----> a second statement
+  |                                |      cannot even be sent
+  +--------------------------------+
+       |
+       v
+  +--------------------------------+
+  | 3. MySQL session               |
+  |    SET SESSION TRANSACTION     |----> writes rejected by the
+  |    READ ONLY                   |      server with error 1792
+  +--------------------------------+
+       |
+       v
+   rows returned
 ```
 
 **A SQL validator.** Only `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC` and `EXPLAIN` may lead a statement. Before any keyword check, string literals, backtick identifiers and `--`, `#` and `/* */` comments are blanked out, so a keyword or semicolon hidden inside a literal is never mistaken for SQL. Statement stacking is rejected. `WITH` and `EXPLAIN ANALYZE` have their bodies scanned for write keywords, because both can carry a write behind a harmless first word. `INTO OUTFILE`, `INTO DUMPFILE`, `LOAD DATA`, `SLEEP()` and `BENCHMARK()` are blocked. Table and database names passed as tool arguments must match `^[A-Za-z0-9_$]+$`, so they cannot break out of the identifier they are interpolated into.
@@ -282,7 +314,7 @@ Other limits worth knowing:
 
 ---
 
-## Development
+## Development and contributing
 
 Everything runs in Docker, so a clone and Docker are the only requirements:
 
@@ -294,47 +326,10 @@ cd mcp-mysql-read-only
 
 That starts a throwaway MySQL container, builds the test image, runs the full suite against it and tears everything down. Your own MySQL is never touched.
 
-With Node 22 installed locally:
+Developer documentation, including why each class is built the way it is and which design patterns are used where, lives in the [wiki](https://github.com/shibbirweb/mcp-mysql-read-only/wiki).
 
-```bash
-npm ci
-npm run build
-npm run test:unit          # no database needed
-npm test                   # integration tests need MySQL, see below
-```
-
-Integration tests read `TEST_MYSQL_HOST`, `TEST_MYSQL_PORT`, `TEST_MYSQL_USER`, `TEST_MYSQL_PASSWORD`. They create and drop two scratch databases (`mcp_test`, `mcp_test_alt`), so point them at a disposable server. When MySQL is unreachable they skip rather than fail.
-
-### Project structure
-
-```
-src/
-  index.ts                Entry point
-  ApplicationFactory.ts   Composition root: the only file that wires things together
-  types/                  Interfaces and type aliases, one file per concern
-  errors/                 Named error classes
-  domain/                 ConnectionTarget, ConnectionProfile (immutable value objects)
-  config/                 Reading configuration from the environment
-  connections/            Target factory, profile registry, connection manager
-  database/               Pool manager, read-only session initializer, query executor
-  validation/             SQL skeletonizer, validators, rules/
-  formatting/             Response and row rendering
-  tools/                  BaseTool, DatabaseScopedTool, connection/, reading/
-  server/                 McpMySqlServer
-```
-
-Dependencies point inward, and no class constructs its own collaborators: everything is injected by `ApplicationFactory`, which is what lets each part be unit tested without a database or the environment.
-
-Developer documentation, including why each class is built the way it is and which design patterns are used where, lives in the [wiki](https://github.com/shibbirweb/mcp-mysql-read-only/wiki) (source in [`docs/wiki/`](docs/wiki/)).
-
----
-
-## Contributing
-
-Pull requests target `master`. CI runs the full suite against MySQL 8.0 and 8.4 and builds the image for amd64 and arm64. Please keep changes covered by tests, and update `docs/wiki/` when behaviour changes.
-
-There is a second copy of this document, [`README.dockerhub.md`](README.dockerhub.md), which is what the release workflow publishes as the Docker Hub description. Docker Hub renders neither mermaid nor relative links, so that copy uses ASCII diagrams and absolute URLs. **If you change user-facing behaviour here, change it there too.**
+Pull requests target `master`. CI runs the full suite against MySQL 8.0 and 8.4 and builds the image for amd64 and arm64.
 
 ## License
 
-[MIT](LICENSE) © Md. Shibbir Ahmed
+[MIT](https://github.com/shibbirweb/mcp-mysql-read-only/blob/master/LICENSE) © Md. Shibbir Ahmed
