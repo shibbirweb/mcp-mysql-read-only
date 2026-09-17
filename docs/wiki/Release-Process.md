@@ -8,6 +8,22 @@ Three workflows in `.github/workflows/`.
 | `docker-publish.yml` | GitHub release published, manual | Re-verifies, then builds and pushes to Docker Hub |
 | `wiki.yml` | Push to `master` touching `docs/wiki/**`, manual | Mirrors `docs/wiki/` into the GitHub wiki |
 
+```mermaid
+flowchart LR
+    PR["pull request<br/>to master"] --> CI1["ci.yml<br/>MySQL 8.0 + 8.4<br/>amd64 + arm64 build"]
+    CI1 --> MERGE["merge to master"]
+    MERGE --> CI2["ci.yml again"]
+    MERGE --> WIKI{"docs/wiki changed?"}
+    WIKI -->|"yes"| PUB["wiki.yml<br/>mirror to GitHub wiki"]
+    MERGE --> TAG["tag vX.Y.Z<br/>publish a release"]
+    TAG --> VER["docker-publish.yml: verify<br/>full suite + tag matches package.json"]
+    VER -->|"green"| PUSH["publish<br/>multi-arch to Docker Hub"]
+    VER -->|"red"| STOP["nothing published"]
+
+    style STOP fill:#fde,stroke:#b55
+    style PUSH fill:#dfd,stroke:#5b5
+```
+
 ## One-time setup
 
 ### Docker Hub secrets

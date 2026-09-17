@@ -4,16 +4,24 @@ Node's built-in `node:test` runner. No test framework dependency, and tests run 
 
 ## Layout
 
+The unit tree mirrors `src/`:
+
 ```
 test/
   helpers/
-    client.js      Minimal MCP client over stdio
-    mysql.js       Fixture databases, connection details, skip probe
+    client.js                          Minimal MCP client over stdio
+    mysql.js                           Fixture databases, skip probe
   unit/
-    validation.test.js     Pure, no database
-    connections.test.js    Pure, no database
+    config/EnvironmentConfigLoader.test.js
+    connections/ConnectionRegistry.test.js
+    connections/ConnectionManager.test.js
+    domain/ConnectionTarget.test.js
+    formatting/RowFormatter.test.js
+    validation/ReadOnlyQueryValidator.test.js
+    validation/SqlSkeletonizer.test.js
+    validation/IdentifierValidator.test.js
   integration/
-    server.test.js         Drives the real server against a real MySQL
+    server.test.js                     Real server, real MySQL, over stdio
 ```
 
 ## Running
@@ -38,35 +46,41 @@ Note `npm test` runs `node --test` with **no path argument**. Passing a director
 
 Integration tests read `TEST_MYSQL_HOST`, `TEST_MYSQL_PORT`, `TEST_MYSQL_USER` and `TEST_MYSQL_PASSWORD`.
 
+## What dependency injection bought
+
+Constructor injection is the reason most of the unit suite can exist at all.
+
+**Configuration.** `EnvironmentConfigLoader` takes the environment as an argument, so a case is an object literal. The earlier procedural version read `process.env` at module scope, which forced tests to re-import modules with a `?case=N` query string to defeat the ESM cache, and to stub `console.error` to capture warnings. Both hacks are gone: warnings are returned as data.
+
+**Connection switching.** `ConnectionManager` takes the pool manager, so `ConnectionManager.test.js` supplies a `FakePoolManager` and asserts the verify-then-commit rule with no database: that a failed switch leaves the previous connection active, that an unknown profile never reaches the network, and that a failed `connect` registers nothing. None of that was unit testable before.
+
+**Validation.** Rules are injected into `ReadOnlyQueryValidator`, so tests can assemble a two-rule chain and assert on ordering, or an empty chain proving rules are the only gate.
+
 ## Unit tests
 
-### `validation.test.js`
+### Validation
 
-Organised in two halves, and **both matter equally**:
+`ReadOnlyQueryValidator.test.js` is organised in halves, and **both matter equally**:
 
-- Statements that must be rejected: bare writes, stacking hidden behind each comment style, writes behind a CTE, `EXPLAIN ANALYZE`, file patterns.
+- Statements that must be rejected: bare writes, stacking behind each comment style, writes behind a CTE, `EXPLAIN ANALYZE`, file patterns.
 - Statements that must be allowed: a semicolon inside a literal, a comment marker inside a literal, a write keyword inside a literal or backticked identifier, and columns named `start`, `begin`, `create_at`.
 
-The second half is the one that catches regressions. Making the validator stricter is easy and usually breaks ordinary queries; those cases pin the boundary. Any change to `validation.ts` needs a case on both sides.
+The second half catches regressions. Making the validator stricter is easy and usually breaks ordinary queries; those cases pin the boundary. Any change to a rule needs a case on both sides.
 
-### `connections.test.js`
+`SqlSkeletonizer.test.js` covers the tokenizer directly, including unterminated literals and the MySQL rule that `--` needs trailing whitespace to start a comment.
 
-`connections.ts` reads the environment once at import, so each case needs a fresh module instance:
+### Domain
 
-```js
-await import(`../../dist/connections.js?case=${counter++}`);
-```
+`ConnectionTarget.test.js` pins two properties that matter beyond the class:
 
-The query string makes the ESM loader treat the specifier as distinct and re-evaluate the module. The helper also saves and restores the relevant environment keys, and stubs `console.error` so the module's startup logging stays out of test output while remaining assertable.
-
-Covered: defaults, malformed JSON, partial profiles, the single-connection fallback, starting-profile precedence, and two properties worth naming:
-
-- **Copy-on-activate.** Mutating the active target must not edit the stored profile, or `use_database` would permanently rewrite a profile.
-- **No password in `describeTarget`.** That function is the cache key *and* the display string, so a leak there reaches both logs and user output.
+- **The password never appears in `key()`**, which is both the cache key and the display string, so a leak there would reach logs and user output.
+- **Immutability.** Reassigning a field throws, and `withDatabase` leaves the original untouched. This is the property whose absence made the procedural version fragile.
 
 ## Integration tests
 
 `server.test.js` spawns the built server with `test/helpers/client.js` and exercises it over real stdio against real MySQL.
+
+It was **not changed by the OOP refactor**, which is what makes it the regression check: the same suite passing before and after is evidence the rewrite preserved behaviour rather than merely compiling.
 
 ### The client is deliberately sequential
 
@@ -80,19 +94,17 @@ Its `close()` sends `SIGTERM` rather than closing stdin, for the reason in [Serv
 
 `seed()` builds two databases, `mcp_test` and `mcp_test_alt`. Two are required: the entire point of the server is switching between them, which one database cannot exercise. They hold different tables on purpose, so a test can tell which database answered from the table list alone.
 
-Seeding happens in a **file-level** `before`, not per suite. Both suites in the file share the fixtures, so per-suite teardown would pull the databases out from under whichever suite ran second. That was a real bug during development.
+Seeding happens in a **file-level** `before`, not per suite. Both suites share the fixtures, so per-suite teardown would pull the databases out from under whichever ran second. That was a real bug during development.
 
 ### Skipping
 
 `probe()` attempts a connection at load time. If it fails, both suites are registered with `describe.skip` and the file reports why.
 
-This keeps `npm test` usable for someone with no MySQL, but it creates a hazard: a broken CI service container would skip the integration half and still go green. CI therefore has an explicit step that runs the integration file, greps for the skip message and fails the build if it appears. A test suite that can silently test nothing is worse than one that fails.
+This keeps `npm test` usable for someone with no MySQL, but creates a hazard: a broken CI service container would skip the integration half and still go green. CI therefore runs the integration file separately, greps for the skip message and fails the build if it appears. A suite that can silently test nothing is worse than one that fails.
 
 ### Coverage
 
-The integration suite pins:
-
-- The exact set of twelve tool names, so adding or renaming a tool is a deliberate change.
+- The exact set of twelve tool names, so adding or renaming one is deliberate.
 - Every read tool against known fixture data.
 - Each switching mechanism, verified with `SELECT DATABASE()` rather than the tool's own success message.
 - The per-call `database` override leaving the active connection unchanged.

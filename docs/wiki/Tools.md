@@ -1,156 +1,150 @@
 # Tools
 
-Source: `src/tools.ts`
+`src/tools/`. One class per tool, twelve in all, in two folders: `connection/` changes where queries go, `reading/` reads data.
 
-Registers all twelve MCP tools. Every handler follows the same shape: validate arguments, do the work, return text.
+## The hierarchy
 
-## Shared helpers
+```mermaid
+classDiagram
+    class BaseTool {
+        <<abstract>>
+        +string name
+        +string description
+        +ZodRawShape inputSchema
+        +register(server)
+        #execute(args)* ToolResult
+        -invoke(args) ToolResult
+    }
 
-### `text(body)` / `failure(body)` / `json(rows)`
+    class DatabaseScopedTool {
+        <<abstract>>
+        #databaseParam
+        #execute(args) ToolResult
+        #read(args)* ToolResult
+        #validateDatabaseArg(db)
+        #validateIdentifier(value, label)
+    }
 
-Thin constructors for MCP content blocks. They exist so no handler hand-rolls the `{ content: [{ type: "text", text }] }` envelope, and so `isError` is set consistently.
+    BaseTool <|-- CurrentConnectionTool
+    BaseTool <|-- ListConnectionsTool
+    BaseTool <|-- ListDatabasesTool
+    BaseTool <|-- UseDatabaseTool
+    BaseTool <|-- UseConnectionTool
+    BaseTool <|-- ConnectTool
+    BaseTool <|-- DatabaseScopedTool
 
-`failure` prefixes `Error: `. The prefix matters: an assistant reading tool output decides what to do next from the text, and an unprefixed message is easily mistaken for data.
+    DatabaseScopedTool <|-- ListTablesTool
+    DatabaseScopedTool <|-- DescribeTableTool
+    DatabaseScopedTool <|-- GetTableIndexesTool
+    DatabaseScopedTool <|-- GetForeignKeysTool
+    DatabaseScopedTool <|-- GetTableSampleTool
+    DatabaseScopedTool <|-- RunQueryTool
+```
 
-### `guard(run)`
+`invoke` is private and `execute` abstract, which is what makes the error boundary impossible to bypass. `DatabaseScopedTool` then implements `execute` itself and leaves `read` abstract, so the `database` guard is equally unskippable:
 
-Wraps every handler body in try/catch and converts a thrown error into a tool error.
+```mermaid
+flowchart LR
+    A["client calls a tool"] --> B["BaseTool.invoke<br/>try / catch"]
+    B --> C["DatabaseScopedTool.execute<br/>validate database arg"]
+    C -->|"invalid"| E["Error: Invalid database name"]
+    C -->|"valid or absent"| D["SubclassTool.read<br/>the actual work"]
+    D --> F["ToolResult"]
+    B -.->|"anything thrown"| G["Error: message"]
 
-This is the reason a dropped connection, a MySQL syntax error or an unconfigured server never takes the process down. An MCP server that exits kills the user's session; one that returns an error lets them try again.
+    style B fill:#eef,stroke:#66a
+    style C fill:#eef,stroke:#66a
+```
 
-It is also what lets `requireActiveTarget()` throw freely in `connections.ts`: the throw becomes a readable tool error carrying its own instructions. See [Configuration and Profiles](Configuration-and-Profiles).
+### `BaseTool`
 
-There is an integration test that issues a deliberate syntax error and then a valid query, asserting the second still works.
+Template Method. `register` and `invoke` are fixed; subclasses supply `name`, `description`, `inputSchema` and `execute`.
 
-### `checkDatabaseParam(database?)`
+`invoke` is the one place a thrown error becomes a tool error. A dropped connection, a MySQL syntax error or an unconfigured server all arrive there and leave as readable text, so the process stays alive and the user can try again. Previously each handler had to remember to call a `guard()` helper; now it cannot be forgotten. An MCP server that throws out of a handler can take the client's whole session with it, which is why this is a base class rather than a convention.
 
-Validates the optional `database` argument, returning an error string or `null`.
+The single cast in `register` is confined to one line and explained there: the SDK derives a callback's argument type from the schema it is given, which it cannot do for a schema held in an abstract property.
 
-Returning a string rather than throwing keeps the "argument was invalid" path distinct from the "something failed at runtime" path in `guard`. A bad argument is the caller's mistake and deserves a precise message.
+Write `description` for a language model, not a person: it is the only thing telling the assistant when to reach for the tool. `use_database` ends with "Takes effect immediately, no restart needed" precisely so an assistant does not tell the user to restart.
 
-Every tool that accepts `database` calls this first. Repetitive, but the alternative is a middleware layer over the MCP SDK's registration API that would obscure more than it saves.
+### `DatabaseScopedTool`
 
-### `formatRows(rows)`
+Refines the Template Method one step: `execute` is implemented here to validate the shared `database` argument, and subclasses supply `read`.
 
-Serialises rows, truncating at `MAX_OUTPUT_ROWS` (100) and appending a note naming the real count.
+Without it, six tools would repeat the same guard and a new tool could silently omit it and interpolate an unchecked identifier.
 
-Truncation protects the context window: a `SELECT *` on a large table would otherwise flood the conversation and could exceed the client's message limit outright.
+It also owns the shared `databaseParam` schema, so the argument reads identically everywhere, and exposes `validateIdentifier` so subclasses guard table names through one path.
 
-The note is deliberately actionable (`Add a LIMIT clause for smaller results`) and states the true total, so the reader knows they are seeing a sample and how to narrow it.
+#### The per-call `database` argument
 
-Note this truncates *output*, not the query. MySQL still materialises every row. `MAX_EXECUTION_TIME` is what bounds the cost of that.
+Applies to that call only, leaving the active connection alone.
+
+Two reasons. Comparing two databases otherwise means switching, reading and switching back, with the session left wherever the last call put it. And a call carrying its own database does not depend on shared mutable state, so it cannot be reordered against a switch issued in the same batch: it is the correct answer to the parallel-call race in [Architecture](Architecture).
 
 ## Connection tools
 
-### `current_connection`
+### `CurrentConnectionTool`
 
-Reports the active profile and target. Reads `getActiveTarget()`, which returns `null` rather than throwing, so the unconfigured state is normal output instead of an error.
+Reads the nullable accessor rather than the asserting one, so an unconfigured server reports its state as ordinary output instead of an error. Nothing has gone wrong; nothing has been chosen yet.
 
-Renders through `describeTarget`, so the password cannot appear.
+Renders through `target.describe()`, which keeps the password out of output.
 
-### `list_connections`
+### `ListConnectionsTool`
 
-Lists profiles with `origin` and marks the active one with `*`.
+Delegates each line to `ConnectionProfile.describe(isActive)`, so the display rule lives with the entity. `(env)` versus `(session)` tells the reader whether a connection survives a restart, and `*` marks the active one more legibly than a separate "active:" line.
 
-Showing `(env)` versus `(session)` tells the reader which connections survive a restart. The `*` marker is easier to read at a glance than a separate "active:" line, and the integration test asserts exactly one line carries it.
+### `ListDatabasesTool`
 
-### `list_databases`
+Hides `information_schema`, `performance_schema`, `mysql` and `sys` unless `include_system` is set. They are noise in most sessions and make it harder to spot the database you want; the flag exists because inspecting them is occasionally the real task.
 
-`SHOW DATABASES` on the current server, hiding `information_schema`, `performance_schema`, `mysql` and `sys` unless `include_system` is true.
+Marks the active database, so "where am I and what else is here" is one call.
 
-Those four are noise in most sessions and their presence makes it harder to spot the database you want. `include_system` exists because inspecting them is occasionally the actual task.
+### `UseDatabaseTool` / `UseConnectionTool` / `ConnectTool`
 
-Also marks the active database with `*`, so "where am I and what else is here" is one call.
+All three delegate the switch to `ConnectionManager`, so the verify-then-commit rule cannot be got wrong in a tool. See [Domain and Configuration](Domain-and-Configuration).
 
-### `use_database`
+`UseConnectionTool` lets `UnknownProfileError` propagate: it already carries the known profile names, and `BaseTool` turns it into a tool error. When someone mistypes a profile, seeing the real list is the fastest route to the fix.
 
-Switches schema on the current server.
-
-Order matters: validate the identifier, build the candidate with `withDatabase`, **verify it**, then commit. `verifyTarget` runs before `setActiveTarget`, so a nonexistent database fails the call and leaves the previous connection working.
-
-It keeps the current profile name (`getActiveName() ?? "custom"`). The connection is still fundamentally "staging", just pointed at a different schema, and renaming it would lose that context.
-
-### `use_connection`
-
-Switches to a named profile, with an optional `database` override.
-
-Membership is checked explicitly so the error can list the known profiles rather than relying on `setActiveProfile`'s generic throw. When someone mistypes a profile name, the list of real ones is the fastest fix.
-
-The `database` override composes two ideas that would otherwise take two calls: "go to staging, but the analytics schema".
-
-### `connect`
-
-Opens an arbitrary server with explicit credentials.
-
-This is the tool that makes a restart never necessary. `MYSQL_PROFILES` is a convenience; `connect` is the guarantee.
-
-Defaults mirror `buildTarget`: `host` is `host.docker.internal`, `port` is 3306, `password` is empty. The host default is spelled out in the parameter description because it is the most common setup mistake, and a model reading that description will usually get it right unprompted.
-
-`alias` is optional, defaulting to `custom`. Supplying one registers the connection so `use_connection` can return to it later. Without it, repeated ad-hoc connections just overwrite `custom`, which is the right behaviour for a one-off.
-
-Credentials are never persisted. They live in the profile registry for the process lifetime and disappear on exit, which `list_connections` communicates through the `session` origin.
+`ConnectTool` builds its target through `ConnectionTargetFactory`, so an ad-hoc connection and a configured profile cannot disagree about defaults. `alias` defaults to `custom`, so repeated one-off connections overwrite rather than accumulating. The `host` parameter description spells out `host.docker.internal` because reaching the host's MySQL from a container is the most common setup mistake, and a model reading that description usually gets it right unprompted.
 
 ## Reading tools
 
-All six accept an optional `database`.
+### `ListTablesTool`
 
-### The per-call `database` argument
+Unwraps `SHOW TABLES` from MySQL's `Tables_in_<database>` single-key objects into a plain list with a count. The raw shape is noisy and its key name varies by database.
 
-Every read tool takes it, and it applies to that call only.
+### `DescribeTableTool` / `GetTableIndexesTool`
 
-It exists for two reasons. Comparing two databases otherwise means switching, reading, switching back, with the session left wherever the last call put it. And it is the correct answer to the parallel-call race described in [Architecture](Architecture): a call carrying its own `database` does not depend on shared mutable state and cannot be reordered against a switch.
+`SHOW COLUMNS` and `SHOW INDEX` with a validated, interpolated table name. `SHOW COLUMNS` rather than an `information_schema` query: shorter output, already scoped to the pool's database.
 
-Implementation is one line per tool, because `resolveTarget` in `db.ts` centralises the decision.
+### `GetForeignKeysTool`
 
-### `list_tables`
+The only read tool using a **placeholder**, because here the table name is a value in a `WHERE` clause rather than an identifier. It is still validated first, so a bad argument fails the same way across every tool.
 
-`SHOW TABLES`, unwrapped from MySQL's `Tables_in_<database>` column into a plain list with a count.
+Scoped by `TABLE_SCHEMA = DATABASE()`, which resolves to the pool's schema and so stays correct under the per-call `database` override, because that override selects a different pool.
 
-The raw result is a list of single-key objects whose key name varies by database, which is noisy to read and awkward to reference. A newline-separated list is far more useful as conversation context.
+Returns a sentence rather than `[]` when there are none: an empty array reads as "the query failed", a sentence reads as an answer.
 
-### `describe_table`
+### `GetTableSampleTool`
 
-`SHOW COLUMNS FROM \`table\``.
+The limit is interpolated because MySQL will not accept a placeholder in `LIMIT` on every version. `clampLimit` duplicates the Zod constraint on purpose: the schema is enforced by the client before dispatch, while clamping in the handler means a value reaching the query string cannot be anything but an integer in range, however it got there.
 
-The table name is interpolated because MySQL cannot parameterise identifiers, which is why `validateIdentifier` runs first. See [Read Only Enforcement](Read-Only-Enforcement).
+### `RunQueryTool`
 
-`SHOW COLUMNS` rather than an `information_schema` query: shorter output, and it is already scoped to the pool's database.
+Validates with `ReadOnlyQueryValidator` before anything touches the network, so a rejected query costs no connection, then formats through `RowFormatter`.
 
-### `get_table_indexes`
+No parameter binding is exposed. Adding a `params` argument would let an assistant separate values from SQL properly, but models inline their values in practice, and the validator plus the read-only session already bound what a query can do.
 
-`SHOW INDEX FROM \`table\``. Same identifier handling.
+## Output
 
-### `get_foreign_keys`
+`ToolResponse` builds the MCP content envelope with static factories, so no handler hand-rolls the shape and `isError` is set consistently. The `Error: ` prefix is load-bearing: an assistant reads tool output to decide what to do next, and an unprefixed message is easily mistaken for data.
 
-Queries `information_schema.KEY_COLUMN_USAGE`, filtered to rows with a `REFERENCED_TABLE_NAME`.
-
-The only read tool that uses a **parameterised** query, because here the table name is a value in a `WHERE` clause rather than an identifier. It is still validated first, since a rejected argument should fail the same way across all tools.
-
-Scoped by `TABLE_SCHEMA = DATABASE()` so it reports the current database only. `DATABASE()` resolves to the pool's schema, which is correct under the per-call `database` override because that override selects a different pool.
-
-Returns a plain sentence when there are no foreign keys, rather than `[]`. An empty array reads as "the query failed"; a sentence reads as an answer.
-
-### `get_table_sample`
-
-`SELECT * FROM \`table\` LIMIT n`.
-
-The limit is interpolated, not parameterised, because MySQL will not accept a placeholder in `LIMIT` in all versions. It is safe because Zod constrains it to a number in 1..50 and the handler then re-clamps with `Math.min(Math.max(Math.trunc(limit), 1), 50)`.
-
-The redundant clamp is deliberate. The schema constraint depends on the client validating arguments before dispatch; clamping in the handler means a value reaching this line cannot be anything but an integer in range, no matter how it got here.
-
-### `run_query`
-
-The general escape hatch. Validates with `validateReadOnlyQuery`, runs it, formats through `formatRows`.
-
-No parameter binding is exposed. Adding a `params` argument would let an assistant separate values from SQL properly, but in practice models inline their values, and the validator plus the read-only session already bound what a query can do.
+`RowFormatter` truncates at 100 rows and appends a note naming the real total and the fix. This protects the context window; a `SELECT *` on a large table would otherwise flood the transcript. It truncates *output*, not the query, which is what `MAX_EXECUTION_TIME` is there to bound.
 
 ## Adding a tool
 
-1. Register it in `registerTools` with a Zod schema.
-2. Wrap the body in `guard`.
-3. Validate identifiers with `validateIdentifier` before interpolating; use placeholders for values.
-4. Accept `database: databaseParam` and pass it to `executeQuery` if it reads data.
-5. Return through `text`, `json` or `failure`.
-6. Add it to the expected tool list in `test/integration/server.test.js`, which asserts the exact set.
-
-Write the description for a language model, not a person: it is the only thing telling the assistant when to reach for the tool. `use_database`'s description ends with "Takes effect immediately, no restart needed" precisely so an assistant does not tell the user to restart.
+1. Create a class under `tools/connection/` or `tools/reading/`, extending `BaseTool` or `DatabaseScopedTool`.
+2. Declare an argument interface; extend `DatabaseScopedArgs` if it reads data.
+3. Implement `name`, `description`, `inputSchema`, and `execute` or `read`.
+4. Validate identifiers with `this.validateIdentifier` before interpolating; use placeholders for values.
+5. Register it in `ApplicationFactory.createTools`.
+6. Add it to the expected tool list in `test/integration/server.test.js`, which asserts the exact set of twelve, so adding one is a deliberate change.

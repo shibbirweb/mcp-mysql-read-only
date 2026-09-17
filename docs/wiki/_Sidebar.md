@@ -2,10 +2,13 @@
 
 **[Home](Home)**
 
-**Internals**
+**Design**
 - [Architecture](Architecture)
-- [Configuration and Profiles](Configuration-and-Profiles)
-- [Connection Pooling](Connection-Pooling)
+- [Design Patterns](Design-Patterns)
+
+**Internals**
+- [Domain and Configuration](Domain-and-Configuration)
+- [Database Layer](Database-Layer)
 - [Read Only Enforcement](Read-Only-Enforcement)
 - [Tools](Tools)
 - [Server Lifecycle](Server-Lifecycle)

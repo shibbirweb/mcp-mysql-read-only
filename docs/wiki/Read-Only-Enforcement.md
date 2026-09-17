@@ -1,99 +1,136 @@
 # Read Only Enforcement
 
-Source: `src/validation.ts`
-
-Pure functions, no imports, no state. Given a string, decide whether it may run. This is the layer most worth understanding before changing anything, because each rule here exists to close a specific hole.
+`src/validation/`. No I/O, no state, no imports beyond types. This is the layer most worth understanding before changing anything, because each rule closes a specific hole.
 
 ## The threat model
 
-The statements reaching `run_query` are written by a language model, usually from a user's plain-English request. The realistic risk is not a determined attacker with a crafted payload; it is a model that misreads "clean up the test rows" as a licence to `DELETE`, or a user who pastes a migration script.
+Statements reaching `run_query` are written by a language model, usually from a plain-English request. The realistic risk is not an attacker with a crafted payload; it is a model reading "clean up the test rows" as licence to `DELETE`, or a user pasting a migration script.
 
-That shapes the design in two ways. False rejections are expensive, because a query wrongly refused makes the tool feel broken and people work around it. And the guard does not need to survive an adversary who already has write credentials and a MySQL client; it needs to make an accidental write impossible through this path.
+That shapes two things. False rejections are expensive, because a query wrongly refused makes the tool feel broken and people route around it. And the guard does not need to survive someone who already holds write credentials and a MySQL client; it needs to make an accidental write impossible through this path.
 
-## `stripLiteralsAndComments(sql)`
+## `SqlSkeletonizer`
 
-A small hand-written scanner that replaces every string literal, quoted identifier and comment with a single space, returning a *skeleton* of the statement's structure. Every check below runs on the skeleton; the original string is what actually reaches MySQL.
+Reduces a statement to its syntactic skeleton, replacing every string literal, quoted identifier and comment with whitespace. Every rule inspects the skeleton; the original string is what reaches MySQL.
 
-It handles `'...'`, `"..."`, `` `...` ``, backslash escapes, doubled-quote escapes (`'it''s'`), `-- ` line comments, `#` line comments and `/* */` block comments.
+Handles `'...'`, `"..."`, `` `...` ``, backslash escapes, doubled-quote escapes (`'it''s'`), `-- ` and `#` line comments, and `/* */` blocks.
 
-Why bother rather than using regular expressions on the raw SQL:
+Its own class because every rule depends on it and none should reimplement it.
+
+### Why not regular expressions
 
 **A naive splitter is wrong in both directions.** Splitting on `;` rejects `SELECT 'a;b'`, an ordinary query, while a `;` inside a comment can hide a second statement from a check that strips comments imperfectly.
 
-**Keyword scanning is worse.** `SELECT * FROM t WHERE status = 'DELETE'` contains the word DELETE. So does a column named `` `delete` ``. Blanking literals and quoted identifiers first means the scanner only ever sees real syntax, which is what makes the write-keyword check below usable at all.
+**Keyword scanning is worse.** `SELECT * FROM t WHERE status = 'DELETE'` contains the word DELETE, and so does a column named `` `delete` ``. Blanking literals and quoted identifiers first is what makes the write-keyword rule usable at all.
 
-Backtick contents are blanked for exactly this reason: an identifier deliberately named after a keyword should be invisible to keyword checks.
+A regex version was tried and dropped. Its failure mode was false rejections of ordinary queries, which is the worst outcome here. These constructs nest and escape in ways regular expressions cannot express correctly.
 
-Note that a line comment is only recognised when `--` is followed by whitespace or end of input, matching MySQL, so `SELECT 1--2` stays an arithmetic expression.
+A line comment is only recognised when `--` is followed by whitespace or end of input, matching MySQL, so `SELECT 1--2` stays arithmetic.
 
-The scanner is character-by-character rather than regex-based because these constructs nest and escape in ways regular expressions cannot express correctly. A regex approach was tried and dropped; the failure mode was false rejections on ordinary queries, which is the worst outcome for this tool.
+## `ReadOnlyQueryValidator`
 
-## `validateReadOnlyQuery(sql)`
+Walks an injected chain of rules and returns the first objection.
 
-Five checks, in order.
+```mermaid
+flowchart TD
+    SQL["raw SQL"] --> SK["SqlSkeletonizer<br/>blank literals, identifiers, comments"]
+    SK --> INS["QueryInspection<br/>raw + skeleton + leadingKeyword"]
 
-### 1. Empty
+    INS --> R1{"EmptyQueryRule"}
+    R1 -->|"objects"| X["first objection wins<br/>returned as a tool error"]
+    R1 -->|"null"| R2{"SingleStatementRule"}
+    R2 -->|"objects"| X
+    R2 -->|"null"| R3{"LeadingKeywordRule"}
+    R3 -->|"objects"| X
+    R3 -->|"null"| R4{"SmuggledWriteRule"}
+    R4 -->|"objects"| X
+    R4 -->|"null"| R5{"DangerousPatternRule"}
+    R5 -->|"objects"| X
+    R5 -->|"null"| OK["valid, the ORIGINAL sql is sent to MySQL"]
 
-After stripping and trimming a trailing `;`, an empty skeleton is rejected. Catches the empty string, whitespace, a bare semicolon and a statement that was nothing but a comment.
-
-### 2. Statement stacking
-
-Any remaining `;` in the skeleton is rejected. Because literals and comments are already blank, this is the real separator count.
-
-A single trailing semicolon is stripped first, since people paste queries that way and it is harmless.
-
-This check is a better error message rather than the actual protection: `multipleStatements: false` in `db.ts` means the driver cannot send a second statement regardless. See [Connection Pooling](Connection-Pooling).
-
-### 3. Leading keyword
-
-The first word must be `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC` or `EXPLAIN`.
-
-Leading `(` characters are stripped first so `(SELECT 1) UNION (SELECT 2)` is recognised.
-
-`WITH` is included because rejecting CTEs outright is a real usability loss on a read-only tool; analytical queries are exactly what people use this for. That inclusion is what makes check 4 necessary.
-
-The error names the offending keyword (`Got: DELETE`), because a model that gets told specifically what was wrong will usually rewrite the query correctly on its own.
-
-### 4. Write keywords, but only where they can hide
-
-```ts
-const needsBodyScan =
-  leading === "WITH" || (leading === "EXPLAIN" && /\bANALYZE\b/i.test(skeleton));
+    style X fill:#fde,stroke:#b55
+    style OK fill:#dfd,stroke:#5b5
+    style SK fill:#eef,stroke:#66a
 ```
 
-Only these two forms have their bodies scanned for write keywords, and the reasoning is the crux of this file.
+Note what is sent to MySQL: the **original** statement. The skeleton exists only to decide whether it may run.
 
-**`WITH` needs it.** MySQL 8 allows `WITH c AS (...) DELETE FROM t`. The first word is on the allowlist while the statement writes.
+`inspect()` builds the `QueryInspection` every rule shares: the raw SQL, the trimmed skeleton with a single trailing semicolon removed, and the leading keyword with leading parentheses stripped so `(SELECT 1) UNION (SELECT 2)` is recognised.
 
-**`EXPLAIN ANALYZE` needs it.** Plain `EXPLAIN DELETE ...` only plans the statement and is safe, which is why it is allowed. `EXPLAIN ANALYZE` genuinely executes it.
+Rule order matters and is fixed in `defaultRules()`: empty first so later rules can assume content, and the leading keyword before the smuggled-write scan, which is conditional on it.
 
-**A plain `SELECT` must not be scanned.** MySQL cannot turn a `SELECT` into a write, so the scan adds no safety, and it actively breaks ordinary queries. `SELECT start FROM sessions` contains the word START. `SELECT begin, end FROM ranges` contains BEGIN. Those are realistic column names, and rejecting them would be a bug. A global scan was tried first and failed on exactly these.
+## The rules
 
-The residual cost is that a column named exactly `update` inside a `WITH` query is rejected unless backticked. Narrow, documented, and far cheaper than the alternative.
+### `EmptyQueryRule`
 
-### 5. Dangerous patterns
+Catches the empty string, whitespace, a bare semicolon and a statement that was nothing but a comment, since all four arrive as an empty skeleton.
 
-`INTO OUTFILE`, `INTO DUMPFILE`, `LOAD DATA`, `SLEEP()` and `BENCHMARK()`.
+### `SingleStatementRule`
 
-The first three write files on the database server, which is a write even though the statement starts with `SELECT`, and is the classic way to turn read access into something worse.
+Any remaining `;` in the skeleton is a real separator. A trailing one is already stripped, since people paste queries that way.
 
-`SLEEP` and `BENCHMARK` are not security issues; they hang the conversation. Blocking them is a blunt availability guard, and it is the one rule here that will occasionally annoy someone legitimately benchmarking. That is documented in the README rather than solved, because the alternative is a query that never returns.
+This is a better error message rather than the actual protection: `multipleStatements: false` means a second statement cannot reach MySQL regardless. See [Database Layer](Database-Layer).
 
-## `validateIdentifier(identifier, label)`
+### `LeadingKeywordRule`
+
+Allows `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC`, `EXPLAIN`.
+
+`WITH` is included because rejecting CTEs outright is a real loss on a read-only analysis tool, and analytical queries are exactly what people use this for. That inclusion is why the next rule exists.
+
+The error names the offending keyword, because a model told precisely what was wrong usually rewrites the query correctly on its own.
+
+### `SmuggledWriteRule`
+
+Scans the body for write keywords, but **only** for two forms:
+
+- `WITH c AS (...) DELETE FROM t` is legal MySQL 8 and writes despite an allowed first word.
+- `EXPLAIN ANALYZE` genuinely executes the statement, unlike plain `EXPLAIN`, which only plans it and is therefore allowed.
+
+**The scan is deliberately not applied to plain SELECT.** MySQL cannot turn a SELECT into a write, so scanning adds no safety there, and it actively breaks ordinary queries: `SELECT start FROM sessions` contains START, `SELECT begin, end FROM ranges` contains BEGIN. Those are realistic column names. A global scan was tried first and failed on exactly these, and the unit suite keeps cases for all of them.
+
+```mermaid
+flowchart TD
+    L{"leading keyword?"}
+    L -->|"WITH"| S["scan body for write keywords"]
+    L -->|"EXPLAIN + ANALYZE"| S
+    L -->|"EXPLAIN alone"| P["pass: plans only, never executes"]
+    L -->|"SELECT / SHOW / DESCRIBE / DESC"| P2["pass without scanning"]
+
+    S -->|"write keyword found"| REJ["rejected"]
+    S -->|"clean"| P3["pass"]
+
+    P2 -.-> N["scanning here would reject<br/>SELECT start, SELECT begin, ..."]
+
+    style REJ fill:#fde,stroke:#b55
+    style N fill:#ffd,stroke:#cb5
+```
+
+The residual cost is that a column named exactly `update` inside a `WITH` query must be backticked. Narrow, documented, and far cheaper than rejecting common column names everywhere.
+
+### `DangerousPatternRule`
+
+`INTO OUTFILE`, `INTO DUMPFILE` and `LOAD DATA` write files on the database server. They begin with SELECT, pass every rule above, and are the classic route from read access to something worse.
+
+`SLEEP` and `BENCHMARK` are not a security problem; they hang the conversation. Blocking them is a blunt availability guard and the one rule that will occasionally frustrate someone measuring query cost. That is documented rather than solved, because the alternative is a tool call that never returns.
+
+This rule applies to every statement, so a sloppy addition causes false rejections everywhere.
+
+## `IdentifierValidator`
 
 Requires `^[A-Za-z0-9_$]+$`.
 
-MySQL cannot parameterise identifiers, so a table name reaching `SHOW COLUMNS FROM \`${table}\`` is string interpolation. This allowlist is what makes that safe: nothing matching it can close the backtick, so nothing can escape the quoted identifier.
+MySQL cannot parameterise identifiers, so a table name reaching `` SHOW COLUMNS FROM `${table}` `` is string interpolation. This allowlist is what makes that safe: nothing matching it can close the backtick, so nothing can escape the quoted identifier.
 
-An allowlist rather than a denylist of dangerous characters, because a denylist has to be right about every encoding and escape MySQL accepts, and an allowlist only has to be right about what a normal identifier looks like.
+An allowlist rather than a denylist, because a denylist must be right about every encoding and escape MySQL accepts, while an allowlist need only be right about what a normal identifier looks like.
 
-The consequence is that identifiers needing quoting (spaces, hyphens, Unicode) are rejected. For those, `run_query` with a hand-written query is the escape hatch, and it goes through the full SQL validator instead.
+The cost is that identifiers needing quoting (spaces, hyphens, Unicode) are rejected. For those, `run_query` with a hand-written statement is the escape hatch, and it goes through the full SQL validator instead.
 
-The `label` parameter puts the right noun in the error (`Invalid database name` versus `Invalid table name`), since one generic message across six tools makes it unclear which argument was wrong.
+The `label` parameter puts the right noun in the message, since one generic error across six tools leaves the reader guessing which argument was wrong.
 
-## Changing the rules
+## Adding or changing a rule
 
-- **Allowing a new leading keyword** means asking whether it can carry a write. If so, add it to the `needsBodyScan` condition.
-- **Adding to `WRITE_KEYWORDS`** is low risk, since the scan only applies to `WITH` and `EXPLAIN ANALYZE`.
-- **Adding to `DANGEROUS_PATTERNS`** applies to every statement, so a sloppy pattern causes false rejections everywhere.
-- **Any change here needs unit tests on both sides**: the thing it blocks, and an ordinary query it must not block. `test/unit/validation.test.js` is organised that way, and the "literals are not read as SQL" and "reads that must be allowed" blocks exist specifically to catch over-rejection.
+1. Implement `ValidationRule`: a `name`, and `evaluate` returning an objection or `null`.
+2. Add it to `ReadOnlyQueryValidator.defaultRules()` in the right position.
+3. Export it from `src/validation/rules/index.ts`.
+4. **Add unit tests on both sides**: the thing it blocks, and an ordinary query it must not block.
+
+That last point is the one that matters. Making the validator stricter is easy and usually breaks ordinary queries; the "literals are never read as SQL" and "reads that must be allowed" blocks in `ReadOnlyQueryValidator.test.js` exist to catch exactly that, and the chain-composability tests show how to exercise one rule in isolation.

@@ -11,6 +11,24 @@ Most MySQL MCP servers read their connection from environment variables once at 
 
 Runs entirely in Docker. Nothing is installed on your machine.
 
+```mermaid
+flowchart LR
+    A["AI assistant<br/>Claude Desktop / Claude Code"]
+    B["mcp-mysql-read-only<br/>one container, whole session"]
+    C[("app_dev")]
+    D[("staging")]
+    E[("analytics")]
+    F[("any server<br/>reached with connect")]
+
+    A <-->|"MCP over stdio"| B
+    B -.->|"pooled per target"| C
+    B -.->|"pooled per target"| D
+    B -.->|"pooled per target"| E
+    B -.->|"opened at runtime"| F
+```
+
+The container lives for the whole session, so the active connection is just state inside it. Switching selects a different pool rather than reconnecting, and switching back reuses a warm one.
+
 ---
 
 ## Quick start
@@ -94,6 +112,43 @@ Just ask. These map onto the connection tools:
 | A different server or credentials | No |
 | A new permanent profile in `MYSQL_PROFILES` | Yes, once |
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor You
+    participant A as Assistant
+    participant S as MCP server
+    participant M as MySQL
+
+    You->>A: "how many users in staging?"
+    A->>S: use_connection(staging)
+    S->>M: open + SELECT 1
+    M-->>S: ok
+    Note over S: verified, so the switch is committed
+    S-->>A: Switched to staging
+    A->>S: run_query(SELECT COUNT(*) ...)
+    S->>M: SELECT COUNT(*) ...
+    M-->>S: 4821
+    A-->>You: 4821 users in staging
+
+    You->>A: "and in production?"
+    Note over A,S: same session, no restart
+    A->>S: use_connection(production)
+```
+
+A switch that fails verification is never committed, so the previous connection stays active and the session keeps working:
+
+```mermaid
+sequenceDiagram
+    participant S as MCP server
+    participant M as MySQL
+
+    S->>M: open "no_such_db" + SELECT 1
+    M-->>S: Unknown database
+    Note over S: active connection left untouched
+    S-->>S: Error: Unknown database 'no_such_db'
+```
+
 ### Named profiles
 
 Define several connections up front with `MYSQL_PROFILES`, a JSON object:
@@ -175,7 +230,23 @@ Starting profile: `MYSQL_DEFAULT_PROFILE` if it names a real profile, else `defa
 
 ## Security
 
-Two independent layers keep this read-only.
+Two independent layers keep this read-only, so a hole in one is not automatically a write.
+
+```mermaid
+flowchart TD
+    Q["run_query"] --> V{"SQL validator"}
+    V -->|"DELETE, DROP, stacked statements,<br/>write behind a CTE, INTO OUTFILE"| R1["rejected, no connection used"]
+    V -->|"reads only"| D{"mysql2 driver"}
+    D -->|"multipleStatements: false"| R2["a second statement<br/>cannot even be sent"]
+    D --> M{"MySQL session"}
+    M -->|"SET SESSION TRANSACTION READ ONLY"| R3["writes rejected by the server<br/>with error 1792"]
+    M -->|"read"| OK["rows returned"]
+
+    style R1 fill:#fde,stroke:#b55
+    style R2 fill:#fde,stroke:#b55
+    style R3 fill:#fde,stroke:#b55
+    style OK fill:#dfd,stroke:#5b5
+```
 
 **A SQL validator.** Only `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC` and `EXPLAIN` may lead a statement. Before any keyword check, string literals, backtick identifiers and `--`, `#` and `/* */` comments are blanked out, so a keyword or semicolon hidden inside a literal is never mistaken for SQL. Statement stacking is rejected. `WITH` and `EXPLAIN ANALYZE` have their bodies scanned for write keywords, because both can carry a write behind a harmless first word. `INTO OUTFILE`, `INTO DUMPFILE`, `LOAD DATA`, `SLEEP()` and `BENCHMARK()` are blocked. Table and database names passed as tool arguments must match `^[A-Za-z0-9_$]+$`, so they cannot break out of the identifier they are interpolated into.
 
@@ -233,7 +304,27 @@ npm test                   # integration tests need MySQL, see below
 
 Integration tests read `TEST_MYSQL_HOST`, `TEST_MYSQL_PORT`, `TEST_MYSQL_USER`, `TEST_MYSQL_PASSWORD`. They create and drop two scratch databases (`mcp_test`, `mcp_test_alt`), so point them at a disposable server. When MySQL is unreachable they skip rather than fail.
 
-Developer documentation, including why each module is built the way it is, lives in the [wiki](https://github.com/shibbirweb/mcp-mysql-read-only/wiki) (source in [`docs/wiki/`](docs/wiki/)).
+### Project structure
+
+```
+src/
+  index.ts                Entry point
+  ApplicationFactory.ts   Composition root: the only file that wires things together
+  types/                  Interfaces and type aliases, one file per concern
+  errors/                 Named error classes
+  domain/                 ConnectionTarget, ConnectionProfile (immutable value objects)
+  config/                 Reading configuration from the environment
+  connections/            Target factory, profile registry, connection manager
+  database/               Pool manager, read-only session initializer, query executor
+  validation/             SQL skeletonizer, validators, rules/
+  formatting/             Response and row rendering
+  tools/                  BaseTool, DatabaseScopedTool, connection/, reading/
+  server/                 McpMySqlServer
+```
+
+Dependencies point inward, and no class constructs its own collaborators: everything is injected by `ApplicationFactory`, which is what lets each part be unit tested without a database or the environment.
+
+Developer documentation, including why each class is built the way it is and which design patterns are used where, lives in the [wiki](https://github.com/shibbirweb/mcp-mysql-read-only/wiki) (source in [`docs/wiki/`](docs/wiki/)).
 
 ---
 

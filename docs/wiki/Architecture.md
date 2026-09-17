@@ -1,85 +1,167 @@
 # Architecture
 
-## Modules
+## Folder layout
 
-| File | Responsibility | Holds state? |
+```
+src/
+  index.ts                  Entry point: construct and start, nothing else
+  ApplicationFactory.ts     Composition root: the only file that wires things
+
+  types/                    Interfaces and type aliases, one file per concern
+  errors/                   Named error classes
+  domain/                   ConnectionTarget, ConnectionProfile
+  config/                   EnvironmentConfigLoader
+  connections/              Target factory, registry, manager
+  database/                 Pool manager, session initializer, query executor
+  validation/               Skeletonizer, validators, rules/
+  formatting/               ToolResponse, RowFormatter
+  tools/                    BaseTool, DatabaseScopedTool, connection/, reading/
+  server/                   McpMySqlServer
+```
+
+Dependencies point inward. `domain/` imports nothing of ours. `validation/` and `formatting/` import only types. `tools/` receives collaborators and constructs none. Only `ApplicationFactory` knows the whole graph.
+
+```mermaid
+flowchart TD
+    I["index.ts"] --> AF["ApplicationFactory<br/><i>composition root</i>"]
+    AF --> SRV["server/<br/>McpMySqlServer"]
+    AF --> CFG["config/<br/>EnvironmentConfigLoader"]
+    SRV --> T["tools/"]
+    T --> CX["connections/<br/>Registry, Manager"]
+    T --> DB["database/<br/>Pools, QueryExecutor"]
+    T --> VAL["validation/"]
+    T --> FMT["formatting/"]
+    CX --> DOM["domain/<br/>ConnectionTarget, ConnectionProfile"]
+    DB --> DOM
+    CFG --> DOM
+    VAL --> TY["types/"]
+    FMT --> TY
+
+    style AF fill:#eef,stroke:#66a
+    style DOM fill:#efe,stroke:#6a6
+```
+
+Everything below `ApplicationFactory` is constructed there and injected downward, which is why no arrow ever points back up.
+
+## Responsibilities
+
+| Class | Responsibility | Holds state? |
 | --- | --- | --- |
-| `src/index.ts` | Wire the MCP server to stdio, handle shutdown | No |
-| `src/connections.ts` | Where connections come from, which one is active | **Yes**: the profile registry and the active target |
-| `src/db.ts` | Turn a target into a pooled handle, run queries | **Yes**: the pool cache |
-| `src/validation.ts` | Decide whether a statement may run | No, pure functions |
-| `src/tools.ts` | Expose everything as MCP tools | No |
+| `ApplicationFactory` | Build the object graph | No |
+| `McpMySqlServer` | Register tools, run, shut down | Shutdown flag |
+| `EnvironmentConfigLoader` | Read configuration, report problems | No |
+| `ConnectionTargetFactory` | Build targets from untrusted input | No |
+| `ConnectionRegistry` | Known profiles, the active connection | **Yes** |
+| `ConnectionManager` | Change the active connection safely | No |
+| `ConnectionPoolManager` | One pool per connection, LRU | **Yes** |
+| `SessionInitializer` | Make each connection read-only | No |
+| `QueryExecutor` | Run a query against the right pool | No |
+| `ReadOnlyQueryValidator` | Decide if a statement may run | No |
+| `IdentifierValidator` | Guard interpolated identifiers | No |
+| `RowFormatter` / `ToolResponse` | Render output | No |
+| `BaseTool` subclasses | One tool each | No |
 
-The dependency direction is one-way: `index` → `tools` → (`db`, `validation`) → `connections`. Nothing imports `tools`, and `validation` imports nothing at all, which is what makes it trivial to unit test.
+Only two classes hold mutable state. Everything else is a pure collaborator.
 
 ## Request flow
 
-A `run_query` call travels like this:
+A `run_query` call:
 
-```
-tools.ts    run_query handler
-              |
-              |  1. validate the database argument, if any
-              v
-validation  validateIdentifier   ->  reject early on a bad identifier
-              |
-              |  2. validate the SQL
-              v
-validation  validateReadOnlyQuery ->  reject early on anything that writes
-              |
-              |  3. run it
-              v
-db.ts       executeQuery
-              |
-              |  4. work out which target this call is for
-              v
-connections requireActiveTarget + withDatabase
-              |
-              |  5. find or create the pool for that target
-              v
-db.ts       getPool  ->  mysql2 pool, read-only session applied on connect
-              |
-              v
-            rows -> truncated to 100 -> MCP text content
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as MCP client
+    participant T as RunQueryTool
+    participant V as ReadOnlyQueryValidator
+    participant Q as QueryExecutor
+    participant R as ConnectionRegistry
+    participant P as ConnectionPoolManager
+    participant M as MySQL
+
+    C->>T: tools/call run_query
+    Note over T: BaseTool.invoke wraps<br/>everything in try/catch
+    T->>T: validate optional database arg
+    T->>V: validate(sql)
+    V->>V: skeletonize, then walk the rule chain
+    alt a rule objects
+        V-->>T: invalid
+        T-->>C: isError, no connection used
+    else allowed
+        V-->>T: valid
+        T->>Q: execute(sql, database?)
+        Q->>R: requireActiveTarget()
+        R-->>Q: ConnectionTarget
+        Q->>P: acquire(target)
+        P-->>Q: pool (new or cached)
+        Q->>M: query
+        M-->>Q: rows
+        Q-->>T: rows
+        T->>T: RowFormatter truncates at 100
+        T-->>C: text
+    end
 ```
 
-Validation always happens before anything touches the network. A rejected query costs no connection.
+Validation always precedes any network work, so a rejected query costs no connection.
 
 ## The one piece of mutable state
 
-Everything that makes this server different from a fixed-connection one comes down to two module-level variables in `connections.ts`:
+Two fields on `ConnectionRegistry`:
 
 ```ts
-let activeName: string | null = null;
-let activeTarget: ConnectionTarget | null = null;
+private activeName: string | null = null;
+private activeTarget: ConnectionTarget | null = null;
 ```
 
-`activeTarget` is the full connection description. `activeName` is only a label for display. Every read tool resolves through `requireActiveTarget()`, so changing these two variables changes where every subsequent query goes.
+Changing them changes where every subsequent query goes. There is no reconnect step: `ConnectionPoolManager` keys its cache by `ConnectionTarget.key()`, so pointing at a different database selects a different pool, and pointing back reuses the original.
 
-That is the whole trick. There is no reconnect step and no teardown: `db.ts` keys its pool cache by the target's identity, so pointing at a different database simply selects a different pool, and pointing back reuses the original one.
+That is the entire mechanism behind switching without a restart.
 
 ### Why not issue `USE <database>`?
 
-It would look simpler, but it makes the pool lie about itself. A `mysql2` pool opens several connections; `USE` only affects the one it was issued on. A later query served by a different connection from that pool would silently run against the old schema. Keying pools by database sidesteps the problem: every connection in a given pool was opened against the right schema from the start.
+It looks simpler but makes the pool lie. A pool opens several connections and `USE` affects only the one it ran on, so a later query served by a different connection would silently use the old schema.
 
-It also makes switching back free, since the previous pool is still warm in the cache.
+```mermaid
+flowchart TB
+    subgraph bad["USE on a shared pool: wrong"]
+        direction TB
+        U1["USE analytics"] --> C1["connection 1<br/>now on analytics"]
+        P1["one pool"] --- C1
+        P1 --- C2["connection 2<br/>still on app_dev"]
+        NQ["next query"] -.->|"may be served by"| C2
+    end
+
+    subgraph good["Pool per target: correct"]
+        direction TB
+        K1["key: reader@db/app_dev"] --> PA["pool A<br/>every connection on app_dev"]
+        K2["key: reader@db/analytics"] --> PB["pool B<br/>every connection on analytics"]
+    end
+
+    style bad fill:#fee,stroke:#c66
+    style good fill:#efe,stroke:#6a6
+```
+
+Keying pools by database means every connection in a pool was opened against the right schema from the start, and switching back is free.
 
 ### Consequence: parallel calls race
 
-Because the active target is process-wide, two tool calls handled concurrently share it. An MCP client that batches calls can issue `use_database` and `run_query` together, and the query may be served before the switch lands.
+The active connection is process-wide, so two concurrently handled tool calls share it. A client that batches calls can issue `use_database` and `run_query` together and see the query answered first.
 
-This is deliberate rather than unnoticed. The alternative, a per-request connection scope, would mean the MCP protocol carrying a session identifier it does not have. The mitigation is the optional `database` argument on every read tool, which resolves the target for that one call and ignores the shared state entirely. See [Tools](Tools).
+This is a known trade rather than an oversight. Scoping the connection per request would require the MCP protocol to carry a session identifier it does not have. The mitigation is the optional `database` argument on every read tool, which resolves its own target and ignores the shared state entirely. See [Tools](Tools).
+
+## Why the composition root
+
+Nothing constructs its own dependencies, which means nothing can be tested in isolation unless something assembles them. `ApplicationFactory` is that something, and keeping it to one file means the wiring is reviewable in one place.
+
+The payoff is concrete: `EnvironmentConfigLoader` takes the environment as a constructor argument, so its tests are object literals rather than module reloads, and `ConnectionManager` takes the pool manager, so failed switches are tested with a fake instead of a real database. See [Design Patterns](Design-Patterns).
 
 ## Why no configuration file
 
-An earlier design read profiles from a JSON file bind-mounted into the container. It was dropped for two reasons.
+An earlier design read profiles from a bind-mounted JSON file. It was dropped because a mount is one more thing that can be silently wrong (a missing host directory is created root-owned, a relative path resolves somewhere unexpected) and the failure shows up as an empty profile list rather than an error.
 
-A bind mount is another thing that can be wrong: a missing host directory gets created as root-owned, a relative path resolves somewhere unexpected, and the failure surfaces as an empty profile list rather than an error. Environment variables are visible in the same place the image is configured.
-
-More importantly, a file makes people think editing it is how you change connection. It is not. `connect` is, and it needs no file, no mount and no restart. `MYSQL_PROFILES` exists only as a convenience for connections you use constantly.
+More importantly, a file suggests that editing it is how you change connection. It is not. `connect` is, and it needs no file, no mount and no restart. `MYSQL_PROFILES` is only a convenience for connections you use constantly.
 
 ## Why stdio and not HTTP
 
-MCP supports both. Stdio means the client owns the process lifetime, there is no port to bind, nothing to authenticate, and nothing is reachable from outside the machine. For a server holding database credentials, not listening on a socket is a feature.
+MCP supports both. Stdio means the client owns the process lifetime, there is no port to bind, nothing to authenticate, and nothing is reachable from outside the machine. For a process holding database credentials, not listening on a socket is a feature.
 
-The cost is that stdout is sacred: it carries the JSON-RPC stream, so a single stray `console.log` corrupts the protocol. Every diagnostic in this codebase goes to `console.error`.
+The cost is that stdout is sacred: it carries the JSON-RPC stream, so one stray `console.log` corrupts the protocol. Every diagnostic in this codebase goes through the injected logger, which writes to stderr.
