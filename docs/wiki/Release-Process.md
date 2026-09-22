@@ -1,15 +1,18 @@
 # Release Process
 
-Four workflows in `.github/workflows/`.
+Five workflows in `.github/workflows/`.
 
 | Workflow | Trigger | Does |
 | --- | --- | --- |
-| `ci.yml` | PR to `master`, push to `master` | Typecheck, build, tests on MySQL 8.0 and 8.4, multi-arch image build, handshake smoke test |
+| `ci.yml` | PR to `master`, push to `master` | Typecheck, build, tests on MySQL 8.0 and 8.4, multi-arch image build, handshake smoke test, npm tarball install test |
 | `docker-publish.yml` | GitHub release published, manual | Re-verifies, then builds and pushes to Docker Hub |
 | `npm-publish.yml` | GitHub release published, manual | Re-verifies, then publishes the package to npm |
+| `mcp-registry-publish.yml` | GitHub release published, manual | Waits for both artifacts, then publishes `server.json` to the MCP Registry |
 | `wiki.yml` | Push to `master` touching `docs/wiki/**`, manual | Mirrors `docs/wiki/` into the GitHub wiki |
 
-The two publish workflows run independently off the same release, so a failure on one does not block the other. Either can be re-run on its own from `workflow_dispatch`.
+The three publish workflows run independently off the same release, so a failure on one does not block the others, and any of them can be re-run on its own from `workflow_dispatch`.
+
+`mcp-registry-publish.yml` is the exception to that independence, and only in timing: the registry hosts no artifacts and verifies ownership against the published npm package and image, so it waits for both to appear before publishing rather than racing them.
 
 ```mermaid
 flowchart LR
@@ -25,10 +28,15 @@ flowchart LR
     VER -->|"red"| STOP["nothing published"]
     VERN -->|"green"| PUSHN["publish<br/>package to npm"]
     VERN -->|"red"| STOP
+    TAG --> MCPW["mcp-registry-publish.yml<br/>wait for both artifacts"]
+    PUSH --> MCPW
+    PUSHN --> MCPW
+    MCPW --> MCP["publish server.json<br/>to the MCP Registry"]
 
     style STOP fill:#fde,stroke:#b55
     style PUSH fill:#dfd,stroke:#5b5
     style PUSHN fill:#dfd,stroke:#5b5
+    style MCP fill:#dfd,stroke:#5b5
 ```
 
 ## One-time setup
@@ -55,6 +63,21 @@ It is configured once on npmjs.com under the package's **Settings → Trusted pu
 Do not add an `NPM_TOKEN` secret. The workflow no longer reads one, and a token is a long-lived credential that OIDC exists to make unnecessary.
 
 The one-time exception is already behind us: a trusted publisher cannot be configured for a package that does not exist, so 1.1.2 was published by hand to create it. Nothing needs publishing by hand again.
+
+### MCP Registry publishing
+
+`mcp-registry-publish.yml` authenticates with `mcp-publisher login github-oidc`, which trades the workflow's OIDC token for the `io.github.shibbirweb/*` namespace. No secret is needed and none should be added.
+
+The registry stores metadata only. It proves the entry belongs to us by reading two things off artifacts we already publish:
+
+| Package entry | Proof | Where it lives |
+| --- | --- | --- |
+| npm | `mcpName` must equal the name in `server.json` | `package.json` |
+| oci | `io.modelcontextprotocol.server.name` annotation must equal it too | `Dockerfile` |
+
+Both are checked against the **published** artifact, not the working tree, which is why the workflow waits for the npm version and the image tag to appear before publishing. The image annotation in particular only counts once an image carrying it is on Docker Hub, so adding that label never takes effect in the release it lands in; it takes effect in the next one.
+
+`server.json` is versioned in the repository and kept in step with `package.json` by `scripts/sync-version.mjs`, including the tag inside the `oci` identifier. CI additionally asserts that `server.json` and `package.json` still name the same package, because a rename is only rejected at publish time, which is after the npm version has become immutable.
 
 ### Initialise the wiki
 
@@ -130,7 +153,9 @@ Build cache uses GitHub Actions cache (`type=gha`), which keeps the arm64 build 
 
 ## Docker Hub description
 
-After a successful push, `peter-evans/dockerhub-description` syncs `README.md` to the Docker Hub page, so the listing cannot drift from the repository.
+The Docker Hub page is not synced by the publish workflow. `dockerhub-description.yml` owns it, running on pushes to `master` that touch `README.dockerhub.md`, which is a second description written for that audience rather than a copy of `README.md`.
+
+Keeping it out of the release means a wording change does not need a release to ship, and a failure to update the description cannot redden a release that published perfectly well.
 
 ## Publishing the wiki
 

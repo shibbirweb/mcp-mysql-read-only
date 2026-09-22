@@ -33,4 +33,10 @@ LABEL org.opencontainers.image.title="mcp-mysql-read-only" \
       org.opencontainers.image.source="https://github.com/shibbirweb/mcp-mysql-read-only" \
       org.opencontainers.image.licenses="MIT"
 
+# How the MCP registry proves this image is ours: it reads the annotation off
+# the published image and requires it to equal the name in server.json. It is
+# checked at publish time, not build time, so the value has to be on an image
+# that is already on Docker Hub before the registry entry can go out.
+LABEL io.modelcontextprotocol.server.name="io.github.shibbirweb/mcp-mysql-read-only"
+
 CMD ["node", "dist/index.js"]
