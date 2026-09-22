@@ -375,6 +375,10 @@ Pull requests target `master`. CI runs the full suite against MySQL 8.0 and 8.4 
 
 There is a second copy of this document, [`README.dockerhub.md`](README.dockerhub.md), which is what the release workflow publishes as the Docker Hub description. Docker Hub renders neither mermaid nor relative links, so that copy uses ASCII diagrams and absolute URLs. **If you change user-facing behaviour here, change it there too.**
 
+## Privacy
+
+The server sends nothing anywhere except to the MySQL you point it at: no telemetry, no analytics, nothing written to disk, nothing kept after it exits. What does leave your machine is whatever your assistant reads, since query results become conversation content. [PRIVACY.md](PRIVACY.md) sets out both halves.
+
 ## License
 
 [MIT](LICENSE) © Md. Shibbir Ahmed
