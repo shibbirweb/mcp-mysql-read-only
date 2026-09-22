@@ -1,6 +1,7 @@
 # mcp-mysql-read-only
 
 [![CI](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml/badge.svg)](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml)
+[![M8ven Verified](https://m8ven.ai/badge/mcp/shibbirweb-mcp-mysql-read-only-1rny1r?variant=verified)](https://m8ven.ai/mcp/shibbirweb-mcp-mysql-read-only-1rny1r)
 [![Docker Hub](https://img.shields.io/docker/v/shibbirweb/mcp-mysql-read-only?label=docker%20hub&sort=semver)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only)
 [![Docker pulls](https://img.shields.io/docker/pulls/shibbirweb/mcp-mysql-read-only?style=flat)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only)
 [![Image size](https://img.shields.io/docker/image-size/shibbirweb/mcp-mysql-read-only/latest?style=flat&label=image%20size)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only/tags)
