@@ -26,6 +26,16 @@ This server cannot prevent that, and neither can any other MCP server. What you 
 
 The read-only guarantee protects your data from being *changed*. It does not stop it from being *read*, which is the entire point of the tool.
 
+## Tool descriptions
+
+An MCP server tells your assistant what its tools do, and the assistant acts on that text. A server can abuse this by describing one thing and doing another, or by hiding instructions in a description to steer the model toward something you did not ask for. The descriptions here are not that.
+
+Every tool's description states what the tool does and stops there. None of them contains instructions to the assistant about unrelated actions, hidden or invisible text, or any attempt to influence behaviour beyond choosing the right tool. `run_query` says it accepts `SELECT`, `WITH`, `SHOW`, `DESCRIBE` and `EXPLAIN` only, and that is exactly what the validator permits. `connect` says credentials are not persisted to disk, and nothing in this server writes to disk. `get_table_sample` says it returns sample rows, and they are real rows from your table, not synthetic ones.
+
+The declared capability hints match the enforced behaviour. The nine reading tools declare `readOnlyHint: true` and cannot write: statements are rejected by the validator before any connection is used, and every pooled connection is additionally opened with `SET SESSION TRANSACTION READ ONLY`, so MySQL itself refuses a write that somehow got past. The three connection tools declare `readOnlyHint: false` because they change which server and database the session points at, and `destructiveHint: false` because they alter nothing in any database.
+
+The tool list is fixed at build time. Nothing is fetched at runtime and no description can change after you install a version, so the tools you audit are the tools you run. CI asserts the annotations by reading them off a real handshake against the packaged artifact, which means a description or hint that drifted from behaviour fails before release.
+
 ## Credentials
 
 Credentials reach the server in one of two ways: environment variables at startup, or the `connect` tool during a session.
