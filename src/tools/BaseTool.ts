@@ -39,10 +39,19 @@ export abstract class BaseTool<TArgs = Record<string, unknown>> {
    * `openWorldHint` stays true throughout because the answers come from a MySQL
    * server, not from a closed set this process controls.
    *
+   * All four hints are stated explicitly, including the two the specification
+   * treats as meaningful only when `readOnlyHint` is false. An omitted hint is
+   * indistinguishable from an unconsidered one: a client, a directory or an
+   * auditor reading a partial set cannot tell "this tool is not destructive"
+   * from "nobody said". Spelling out the redundant pair costs two lines and
+   * removes that ambiguity.
+   *
    * Overridden only by the three tools that repoint the connection.
    */
   public readonly annotations: ToolAnnotations = {
     readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
     openWorldHint: true,
   };
 

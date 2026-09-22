@@ -250,3 +250,21 @@ jobs:
           echo "$output" | grep -q '"readOnlyHint":true'
           version=$(node -p "require('/tmp/consumer/node_modules/@shibbirweb/mcp-mysql-read-only/package.json').version")
           echo "$output" | grep -q "\"version\":\"$version\""
+
+          # Every tool states all four hints. A partial set is what directories
+          # and auditors flag, because an omitted hint cannot be told apart
+          # from one nobody considered.
+          echo "$output" > /tmp/tools.jsonl
+          node -e '
+            const lines = require("fs").readFileSync("/tmp/tools.jsonl", "utf8").trim().split("\n");
+            const listing = lines.map((line) => JSON.parse(line)).find((message) => message.id === 2);
+            const required = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"];
+            const incomplete = listing.result.tools.filter(
+              (tool) => required.some((hint) => typeof (tool.annotations || {})[hint] !== "boolean")
+            );
+            if (incomplete.length > 0) {
+              console.error("::error::Tools missing explicit hints: " + incomplete.map((t) => t.name).join(", "));
+              process.exit(1);
+            }
+            console.log(`all ${listing.result.tools.length} tools declare all four hints`);
+          '
