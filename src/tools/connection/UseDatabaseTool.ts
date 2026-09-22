@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { BaseTool } from "../BaseTool.js";
 import { ConnectionManager } from "../../connections/ConnectionManager.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
@@ -24,6 +25,18 @@ export class UseDatabaseTool extends BaseTool<UseDatabaseArgs> {
 
   public readonly inputSchema: ZodRawShape = {
     database: z.string().describe("Database name to switch to"),
+  };
+
+  /**
+   * Changes which schema the reading tools see, so not read-only. Nothing in
+   * the database is touched, and switching twice to the same name leaves the
+   * same state, hence not destructive and idempotent.
+   */
+  public readonly annotations: ToolAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
   };
 
   constructor(

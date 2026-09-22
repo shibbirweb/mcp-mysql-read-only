@@ -19,7 +19,7 @@ export class McpMySqlServer {
     private readonly pools: ConnectionPoolManager,
     private readonly logger: (message: string) => void,
     name = "mysql-readonly-switchable",
-    version = "1.0.0"
+    version = "1.1.0"
   ) {
     this.server = new McpServer({ name, version });
   }

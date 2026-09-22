@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { ZodRawShape } from "zod";
 import { ToolResponse } from "../formatting/ToolResponse.js";
 import type { ToolResult } from "../types/tool.types.js";
@@ -26,6 +27,25 @@ export abstract class BaseTool<TArgs = Record<string, unknown>> {
 
   public abstract readonly inputSchema: ZodRawShape;
 
+  /**
+   * What the client is allowed to assume before it runs the call.
+   *
+   * The default is the whole point of this server: every reading tool is
+   * incapable of changing anything, so a client may run it without stopping to
+   * ask. `ReadOnlyQueryValidator` is what makes that true; this is what says so
+   * out loud, and a client that never hears it has to treat `run_query` as if
+   * it might drop a table.
+   *
+   * `openWorldHint` stays true throughout because the answers come from a MySQL
+   * server, not from a closed set this process controls.
+   *
+   * Overridden only by the three tools that repoint the connection.
+   */
+  public readonly annotations: ToolAnnotations = {
+    readOnlyHint: true,
+    openWorldHint: true,
+  };
+
   protected abstract execute(args: TArgs): Promise<ToolResult>;
 
   /**
@@ -35,8 +55,14 @@ export abstract class BaseTool<TArgs = Record<string, unknown>> {
    * argument interface, so the type is recovered immediately below.
    */
   public register(server: McpServer): void {
-    server.tool(this.name, this.description, this.inputSchema, (args: Record<string, unknown>) =>
-      this.invoke(args as TArgs)
+    server.registerTool(
+      this.name,
+      {
+        description: this.description,
+        inputSchema: this.inputSchema,
+        annotations: this.annotations,
+      },
+      (args: Record<string, unknown>) => this.invoke(args as TArgs)
     );
   }
 

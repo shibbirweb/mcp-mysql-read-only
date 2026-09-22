@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { BaseTool } from "../BaseTool.js";
 import { ConnectionManager } from "../../connections/ConnectionManager.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
@@ -28,6 +29,18 @@ export class UseConnectionTool extends BaseTool<UseConnectionArgs> {
       .string()
       .optional()
       .describe("Optional database to use instead of the profile's own database"),
+  };
+
+  /**
+   * Repoints the reading tools at another server, so not read-only. No data is
+   * altered and repeating the call is a no-op, hence not destructive and
+   * idempotent.
+   */
+  public readonly annotations: ToolAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
   };
 
   constructor(

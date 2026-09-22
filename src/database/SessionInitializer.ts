@@ -1,6 +1,19 @@
 import type { Pool } from "mysql2/promise";
 
 /**
+ * The connection this module actually deals with: the callback-API one.
+ *
+ * mysql2's promise typings declare the pool's `connection` event as handing
+ * over the promise-API `PoolConnection`, but `PromisePool` re-emits the core
+ * pool's event with its arguments untouched, so what arrives is the core
+ * connection, whose `query` takes a callback. The event is the only place the
+ * two APIs meet, so the correction is applied there and nowhere else.
+ */
+type CoreConnection = {
+  query: (sql: string, callback: (error: unknown) => void) => void;
+};
+
+/**
  * Applies the server-side half of the read-only guarantee to every connection
  * a pool opens.
  *
@@ -24,17 +37,19 @@ export class SessionInitializer {
    */
   public attachTo(pool: Pool): void {
     pool.on("connection", (connection) => {
+      const coreConnection = connection as unknown as CoreConnection;
+
       // SET SESSION TRANSACTION READ ONLY sets the access mode for subsequent
       // transactions. With autocommit on, every statement is its own
       // transaction, so MySQL rejects any write with error 1792. It cannot be
       // undone from a query: SET is not an allowed leading keyword, and
       // statement stacking is impossible with multipleStatements disabled.
-      this.apply(connection, "SET SESSION TRANSACTION READ ONLY", "set read-only session");
+      this.apply(coreConnection, "SET SESSION TRANSACTION READ ONLY", "set read-only session");
 
       // Caps SELECT execution server-side so a runaway query is killed by
       // MySQL instead of hanging the conversation.
       this.apply(
-        connection,
+        coreConnection,
         `SET SESSION MAX_EXECUTION_TIME = ${this.queryTimeoutMs}`,
         "set statement timeout"
       );
@@ -49,11 +64,7 @@ export class SessionInitializer {
    * not be set read-only is still guarded by the validator, so continuing is
    * correct; crashing on a MySQL variant lacking one of these variables is not.
    */
-  private apply(
-    connection: { query: (sql: string, callback: (error: unknown) => void) => void },
-    sql: string,
-    description: string
-  ): void {
+  private apply(connection: CoreConnection, sql: string, description: string): void {
     connection.query(sql, (error: unknown) => {
       if (error) {
         this.logger(`could not ${description}: ${String(error)}`);

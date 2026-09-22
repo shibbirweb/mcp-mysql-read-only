@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { BaseTool } from "../BaseTool.js";
 import { ConnectionManager } from "../../connections/ConnectionManager.js";
 import { ConnectionTargetFactory } from "../../connections/ConnectionTargetFactory.js";
@@ -26,6 +27,18 @@ export class ConnectTool extends BaseTool<ConnectArgs> {
   public readonly name = "connect";
   public readonly description =
     "Connect to any MySQL server at runtime with explicit credentials. Not persisted to disk, but kept for the rest of the session under an alias";
+
+  /**
+   * Not read-only: it opens a server and stores the alias for the session.
+   * Not destructive either, because nothing in any database changes, and
+   * re-running the same call lands on the same connection.
+   */
+  public readonly annotations: ToolAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
 
   /** Used when no alias is given, so repeated ad-hoc connections overwrite. */
   private static readonly DEFAULT_ALIAS = "custom";
