@@ -68,19 +68,30 @@ If your organisation does not allow `GITHUB_TOKEN` to write the wiki, create a f
 
 ## Cutting a release
 
-1. Update `version` in `package.json`.
-2. Merge to `master` with CI green.
-3. Tag and create a GitHub release, with the tag matching the version prefixed by `v`:
+1. Bump the version. Never by hand:
    ```bash
-   git tag v1.1.0
-   git push origin v1.1.0
+   npm version patch   # or minor, or major
+   ```
+   This writes `package.json` and the lockfile, runs `scripts/sync-version.mjs` to rewrite the tag list in `README.dockerhub.md`, stages that file, commits, and creates the `v` tag.
+2. Merge to `master` with CI green.
+3. Push the tag and publish a GitHub release for it:
+   ```bash
+   git push origin v1.2.3
    ```
    Then publish a release for that tag in the GitHub UI.
 4. `docker-publish.yml` and `npm-publish.yml` both run automatically.
 
+### One version, in one place
+
+`package.json` is the source of truth, and everything that can derive from it does.
+
+The version a client sees in the MCP handshake is read at startup by `PackageVersionLoader`, so it cannot drift: `McpMySqlServer` takes `version` as a required constructor argument with no default, because a default is a second place to remember and the one that silently wins when it is forgotten. `package.json` is present in every way this server ships, including the runtime image, which copies it in before the build output.
+
+The one copy that cannot read `package.json` is the tag list in `README.dockerhub.md`, because it is prose. `scripts/sync-version.mjs` writes it, `npm run sync-version` runs it on its own, and `node scripts/sync-version.mjs --check` fails without writing. CI runs the check, so a hand-edited version is caught on the pull request. If the tags section is ever restructured, the script fails loudly rather than quietly matching nothing.
+
 ### The tag must match package.json
 
-The workflow compares the release tag against `package.json` and fails if they disagree. A release tagged `v1.1.0` built from a tree still saying `1.0.0` produces an image reporting the wrong version to every client through the MCP handshake, which is very hard to debug later.
+Both publish workflows compare the release tag against `package.json` and fail if they disagree. A release tagged `v1.2.0` built from a tree still saying `1.1.0` ships an artifact whose version contradicts its own release notes, and on npm that cannot be taken back. Following step 1 above makes the mismatch impossible, since the tag is created from the same bump.
 
 ### Tags produced
 

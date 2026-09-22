@@ -1,4 +1,5 @@
 import { EnvironmentConfigLoader } from "./config/EnvironmentConfigLoader.js";
+import { PackageVersionLoader } from "./config/PackageVersionLoader.js";
 import { ConnectionManager } from "./connections/ConnectionManager.js";
 import { ConnectionRegistry } from "./connections/ConnectionRegistry.js";
 import { ConnectionTargetFactory } from "./connections/ConnectionTargetFactory.js";
@@ -46,7 +47,8 @@ export class ApplicationFactory {
   constructor(
     private readonly configLoader: ConfigurationLoader = new EnvironmentConfigLoader(),
     private readonly logger: (message: string) => void = (message) =>
-      console.error(`[mcp-mysql-ro] ${message}`)
+      console.error(`[mcp-mysql-ro] ${message}`),
+    private readonly versionLoader: PackageVersionLoader = new PackageVersionLoader()
   ) {}
 
   public create(): McpMySqlServer {
@@ -80,7 +82,7 @@ export class ApplicationFactory {
 
     const tools = this.createTools(connections, queries);
 
-    return new McpMySqlServer(tools, pools, this.logger);
+    return new McpMySqlServer(tools, pools, this.logger, this.versionLoader.load());
   }
 
   private createTools(

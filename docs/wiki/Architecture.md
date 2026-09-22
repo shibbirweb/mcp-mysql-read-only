@@ -10,7 +10,7 @@ src/
   types/                    Interfaces and type aliases, one file per concern
   errors/                   Named error classes
   domain/                   ConnectionTarget, ConnectionProfile
-  config/                   EnvironmentConfigLoader
+  config/                   EnvironmentConfigLoader, PackageVersionLoader
   connections/              Target factory, registry, manager
   database/                 Pool manager, session initializer, query executor
   validation/               Skeletonizer, validators, rules/
@@ -50,6 +50,7 @@ Everything below `ApplicationFactory` is constructed there and injected downward
 | `ApplicationFactory` | Build the object graph | No |
 | `McpMySqlServer` | Register tools, run, shut down | Shutdown flag |
 | `EnvironmentConfigLoader` | Read configuration, report problems | No |
+| `PackageVersionLoader` | Read the handshake version from `package.json` | No |
 | `ConnectionTargetFactory` | Build targets from untrusted input | No |
 | `ConnectionRegistry` | Known profiles, the active connection | **Yes** |
 | `ConnectionManager` | Change the active connection safely | No |

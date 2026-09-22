@@ -149,6 +149,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      # The Docker Hub tag list is prose and cannot read package.json, so it is
+      # the one copy of the version a bump can leave behind.
+      - name: Assert the version is in sync everywhere
+        run: node scripts/sync-version.mjs --check
+
       # Everything below runs against the tarball rather than the working tree,
       # because that is the only artifact npm users ever receive. dist/ is
       # gitignored, so prepack is what puts it in there.
