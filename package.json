@@ -1,6 +1,6 @@
 {
   "name": "@shibbirweb/mcp-mysql-read-only",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "A read-only MySQL MCP server whose database and connection can be switched at runtime, with no client restart.",
   "license": "MIT",
   "author": "Md. Shibbir Ahmed <shibbirweb@gmail.com>",
@@ -10,7 +10,8 @@
     "mcp-mysql-read-only": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -39,12 +40,12 @@
   "scripts": {
     "build": "tsc",
     "prepack": "npm run build",
-    "version": "node scripts/sync-version.mjs && git add README.dockerhub.md",
+    "version": "node scripts/sync-version.mjs && git add README.dockerhub.md server.json",
     "sync-version": "node scripts/sync-version.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test",
-    "test:unit": "npm run build && node --test test/unit/*.test.js",
+    "test:unit": "npm run build && node --test \"test/unit/**/*.test.js\"",
     "test:integration": "npm run build && node --test test/integration/*.test.js"
   },
   "dependencies": {

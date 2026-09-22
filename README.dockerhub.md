@@ -55,7 +55,7 @@ The container lives for the whole session, so the active connection is just stat
 
 ## Supported tags
 
-`1.1.4`, `1.1`, `1`, `latest` — built for `linux/amd64` and `linux/arm64`.
+`1.1.5`, `1.1`, `1`, `latest` — built for `linux/amd64` and `linux/arm64`.
 
 ---
 
@@ -330,6 +330,10 @@ That starts a throwaway MySQL container, builds the test image, runs the full su
 Developer documentation, including why each class is built the way it is and which design patterns are used where, lives in the [wiki](https://github.com/shibbirweb/mcp-mysql-read-only/wiki).
 
 Pull requests target `master`. CI runs the full suite against MySQL 8.0 and 8.4 and builds the image for amd64 and arm64.
+
+## Changelog
+
+Release history, including which versions reached npm and which reached only Docker Hub, is in [CHANGELOG.md](https://github.com/shibbirweb/mcp-mysql-read-only/blob/master/CHANGELOG.md).
 
 ## Privacy
 
