@@ -331,6 +331,10 @@ Developer documentation, including why each class is built the way it is and whi
 
 Pull requests target `master`. CI runs the full suite against MySQL 8.0 and 8.4 and builds the image for amd64 and arm64.
 
+## Privacy
+
+The server sends nothing anywhere except to the MySQL you point it at: no telemetry, no analytics, nothing written to disk, nothing kept after it exits. What does leave your machine is whatever your assistant reads, since query results become conversation content. [PRIVACY.md](https://github.com/shibbirweb/mcp-mysql-read-only/blob/master/PRIVACY.md) sets out both halves.
+
 ## License
 
 [MIT](https://github.com/shibbirweb/mcp-mysql-read-only/blob/master/LICENSE) © Md. Shibbir Ahmed
