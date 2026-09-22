@@ -130,7 +130,7 @@ jobs:
           fi
           echo "$name@$version is unpublished, continuing."
 
-      # A prerelease must not become what `npx mcp-mysql-read-only` resolves
+      # A prerelease must not become what `npx @shibbirweb/mcp-mysql-read-only` resolves
       # to, which mirrors how `latest` is withheld from prereleases on Docker
       # Hub. Anyone who wants one asks for it by name: npm i pkg@next.
       - name: Choose the dist-tag

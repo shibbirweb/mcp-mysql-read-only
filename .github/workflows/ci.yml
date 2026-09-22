@@ -221,5 +221,5 @@ jobs:
           echo "$output" | grep -q '"name":"use_database"'
           echo "$output" | grep -q '"name":"run_query"'
           echo "$output" | grep -q '"readOnlyHint":true'
-          version=$(node -p "require('/tmp/consumer/node_modules/mcp-mysql-read-only/package.json').version")
+          version=$(node -p "require('/tmp/consumer/node_modules/@shibbirweb/mcp-mysql-read-only/package.json').version")
           echo "$output" | grep -q "\"version\":\"$version\""
