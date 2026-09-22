@@ -10,7 +10,8 @@
     "mcp-mysql-read-only": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public"
