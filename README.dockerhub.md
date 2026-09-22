@@ -13,6 +13,7 @@
 # mcp-mysql-read-only
 
 [![CI](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml/badge.svg)](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml)
+[![M8ven Verified](https://m8ven.ai/badge/mcp/shibbirweb-mcp-mysql-read-only-1rny1r?variant=verified)](https://m8ven.ai/mcp/shibbirweb-mcp-mysql-read-only-1rny1r)
 [![Docker pulls](https://img.shields.io/docker/pulls/shibbirweb/mcp-mysql-read-only?style=flat)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only)
 [![Image size](https://img.shields.io/docker/image-size/shibbirweb/mcp-mysql-read-only/latest?style=flat&label=image%20size)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only/tags)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/shibbirweb/mcp-mysql-read-only/blob/master/LICENSE)
