@@ -1,0 +1,169 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v1.0.0). Defaults to the current ref."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  # Required for npm trusted publishing (OIDC) and for provenance attestation
+  # on the token path. Harmless when neither is in use.
+  id-token: write
+
+jobs:
+  # Same gate as the Docker release: an npm version is immutable, so a broken
+  # publish cannot be replaced, only superseded. The minutes spent here are
+  # cheaper than a bad version living on the registry forever.
+  verify:
+    name: Verify before publishing
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_root_pw
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptest_root_pw --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+      - run: node --test
+        env:
+          TEST_MYSQL_HOST: 127.0.0.1
+          TEST_MYSQL_PORT: 3306
+          TEST_MYSQL_USER: root
+          TEST_MYSQL_PASSWORD: test_root_pw
+
+      # npm takes its version from package.json rather than from the tag, so a
+      # mismatch here does not fail the publish: it silently ships the wrong
+      # version under the right release notes.
+      - name: Check the tag matches package.json
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          echo "tag=$tag package.json=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Release tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+
+  publish:
+    name: Publish package
+    needs: verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      # Deliberately without the npm cache: a release build should resolve
+      # everything fresh rather than reuse whatever a previous run left behind.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Node 22 ships npm 10, and trusted publishing needs 11.5.1 or newer.
+      # Without this the OIDC path fails with a plain "need auth".
+      - name: Use an npm that supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - run: npm ci --no-audit --no-fund
+
+      # Two supported ways in, checked here rather than left to fail inside
+      # publish. Trusted publishing is preferred: nothing long-lived is stored
+      # in the repository. The token path exists because a trusted publisher
+      # cannot be configured on npmjs.com until the package exists, so the
+      # first release has to get there some other way.
+      - name: Resolve how to authenticate
+        id: auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            echo "mode=token" >> "$GITHUB_OUTPUT"
+            echo "Publishing with NPM_TOKEN."
+          else
+            echo "mode=oidc" >> "$GITHUB_OUTPUT"
+            echo "Publishing with trusted publishing (OIDC)."
+          fi
+
+      # A re-run of a release that already published would otherwise fail deep
+      # inside npm with E403, which reads like a credentials problem.
+      - name: Check this version is not already published
+        run: |
+          set -euo pipefail
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "$name@$version" version > /dev/null 2>&1; then
+            echo "::error::$name@$version is already on npm. Bump the version; npm releases cannot be replaced."
+            exit 1
+          fi
+          echo "$name@$version is unpublished, continuing."
+
+      # A prerelease must not become what `npx mcp-mysql-read-only` resolves
+      # to, which mirrors how `latest` is withheld from prereleases on Docker
+      # Hub. Anyone who wants one asks for it by name: npm i pkg@next.
+      - name: Choose the dist-tag
+        id: disttag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ] && [ "${{ github.event.release.prerelease }}" = "true" ]; then
+            echo "value=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      # prepack rebuilds dist/ here, which is what makes the tarball
+      # self-consistent: dist/ is gitignored, so nothing stale can be shipped.
+      - name: Publish (trusted publishing)
+        if: steps.auth.outputs.mode == 'oidc'
+        run: npm publish --access public --tag "${{ steps.disttag.outputs.value }}"
+
+      - name: Publish (token)
+        if: steps.auth.outputs.mode == 'token'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance --tag "${{ steps.disttag.outputs.value }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published to npm"
+            echo
+            echo '```'
+            echo "$(node -p "require('./package.json').name")@$(node -p "require('./package.json').version")"
+            echo '```'
+            echo
+            echo "dist-tag: ${{ steps.disttag.outputs.value }}"
+            echo "auth: ${{ steps.auth.outputs.mode }}"
+          } >> "$GITHUB_STEP_SUMMARY"

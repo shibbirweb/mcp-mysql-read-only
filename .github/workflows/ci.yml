@@ -133,3 +133,93 @@ jobs:
           echo "$output"
           echo "$output" | grep -q '"name":"use_database"'
           echo "$output" | grep -q '"name":"run_query"'
+
+  npm-package:
+    name: npm package
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # The Docker Hub tag list is prose and cannot read package.json, so it is
+      # the one copy of the version a bump can leave behind.
+      - name: Assert the version is in sync everywhere
+        run: node scripts/sync-version.mjs --check
+
+      # Everything below runs against the tarball rather than the working tree,
+      # because that is the only artifact npm users ever receive. dist/ is
+      # gitignored, so prepack is what puts it in there.
+      - name: Pack the tarball
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pkg
+          npm pack --pack-destination /tmp/pkg
+          ls -l /tmp/pkg
+
+      # A stray files entry that shipped src/ or test/, or one that dropped
+      # dist/, is invisible in review and permanent once published.
+      - name: Assert the tarball ships dist and nothing else
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const packed = JSON.parse(require("fs").readFileSync("/tmp/pack.json", "utf8"));
+            const files = packed[0].files.map((file) => file.path);
+            console.log(files.join("\n"));
+            const leaked = files.filter((path) => /^(src|test|docs)\//.test(path));
+            if (leaked.length > 0) {
+              console.error("::error::Tarball contains files it should not ship: " + leaked.join(", "));
+              process.exit(1);
+            }
+            if (!files.includes("dist/index.js")) {
+              console.error("::error::Tarball is missing dist/index.js");
+              process.exit(1);
+            }
+          '
+
+      - name: Install the tarball into a clean project
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/consumer
+          cd /tmp/consumer
+          npm init -y > /dev/null
+          npm install /tmp/pkg/*.tgz
+
+      # npx resolves through the bin link, so a missing shebang or a lost
+      # executable bit breaks every npm user while the Docker path stays green.
+      - name: Assert the bin is linked, executable and has a shebang
+        run: |
+          set -euo pipefail
+          bin=/tmp/consumer/node_modules/.bin/mcp-mysql-read-only
+          test -x "$bin"
+          target=$(readlink -f "$bin")
+          echo "$bin -> $target"
+          head -1 "$target" | grep -qx '#!/usr/bin/env node'
+
+      # Same handshake as the Docker smoke test, through the installed binary.
+      # It also pins two things the unit tests cannot see: the annotations the
+      # clients read, and the version reported over the wire, which comes from
+      # a literal in McpMySqlServer rather than from package.json.
+      - name: Smoke test the MCP handshake through the installed bin
+        run: |
+          set -euo pipefail
+          cd /tmp/consumer
+          output=$(printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            | timeout 30 ./node_modules/.bin/mcp-mysql-read-only || true)
+          echo "$output"
+          echo "$output" | grep -q '"name":"use_database"'
+          echo "$output" | grep -q '"name":"run_query"'
+          echo "$output" | grep -q '"readOnlyHint":true'
+          version=$(node -p "require('/tmp/consumer/node_modules/mcp-mysql-read-only/package.json').version")
+          echo "$output" | grep -q "\"version\":\"$version\""

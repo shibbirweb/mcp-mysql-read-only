@@ -14,12 +14,17 @@ export class McpMySqlServer {
   private readonly server: McpServer;
   private shuttingDown = false;
 
+  /**
+   * `version` is required and has no default on purpose: a default here is a
+   * second place to remember at release time, and the one that silently wins
+   * when it is forgotten. The composition root reads it from `package.json`.
+   */
   constructor(
     private readonly tools: BaseTool<never>[],
     private readonly pools: ConnectionPoolManager,
     private readonly logger: (message: string) => void,
-    name = "mysql-readonly-switchable",
-    version = "1.1.0"
+    version: string,
+    name = "mysql-readonly-switchable"
   ) {
     this.server = new McpServer({ name, version });
   }
