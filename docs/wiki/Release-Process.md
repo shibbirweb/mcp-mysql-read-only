@@ -110,7 +110,7 @@ The rolling `1.2` and `1` tags let people pin to a compatibility level rather th
 
 ### npm dist-tags
 
-A normal release publishes under `latest`, which is what a bare `npx mcp-mysql-read-only` resolves to. A GitHub prerelease publishes under `next` instead, for the same reason `latest` is withheld on Docker Hub.
+A normal release publishes under `latest`, which is what a bare `npx @shibbirweb/mcp-mysql-read-only` resolves to. A GitHub prerelease publishes under `next` instead, for the same reason `latest` is withheld on Docker Hub.
 
 An npm version is permanent. It cannot be replaced, and unpublishing is restricted, so a mistake is corrected only by releasing a higher version. `npm-publish.yml` refuses upfront if the version in `package.json` is already on the registry, which is what a re-run of an already-published release would otherwise hit as an opaque `E403`.
 

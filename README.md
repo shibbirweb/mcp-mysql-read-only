@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml/badge.svg)](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml)
 [![M8ven Verified](https://m8ven.ai/badge/mcp/shibbirweb-mcp-mysql-read-only-1rny1r?variant=verified)](https://m8ven.ai/mcp/shibbirweb-mcp-mysql-read-only-1rny1r)
-[![npm](https://img.shields.io/npm/v/mcp-mysql-read-only?label=npm&color=cb3837)](https://www.npmjs.com/package/mcp-mysql-read-only)
-[![npm downloads](https://img.shields.io/npm/dm/mcp-mysql-read-only?style=flat&label=npm%20downloads)](https://www.npmjs.com/package/mcp-mysql-read-only)
+[![npm](https://img.shields.io/npm/v/%40shibbirweb%2Fmcp-mysql-read-only?label=npm&color=cb3837)](https://www.npmjs.com/package/@shibbirweb/mcp-mysql-read-only)
+[![npm downloads](https://img.shields.io/npm/dm/%40shibbirweb%2Fmcp-mysql-read-only?style=flat&label=npm%20downloads)](https://www.npmjs.com/package/@shibbirweb/mcp-mysql-read-only)
 [![Docker Hub](https://img.shields.io/docker/v/shibbirweb/mcp-mysql-read-only?label=docker%20hub&sort=semver)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only)
 [![Docker pulls](https://img.shields.io/docker/pulls/shibbirweb/mcp-mysql-read-only?style=flat)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only)
 [![Image size](https://img.shields.io/docker/image-size/shibbirweb/mcp-mysql-read-only/latest?style=flat&label=image%20size)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only/tags)
@@ -13,12 +13,12 @@ An [MCP](https://modelcontextprotocol.io) server that gives an AI assistant read
 
 Most MySQL MCP servers read their connection from environment variables once at startup. Pointing one at a different database means editing a config file and restarting the assistant, which loses your conversation. This server keeps the connection as runtime state, so switching is just another tool call.
 
-Runs entirely in Docker. Nothing is installed on your machine.
+Runs from npm with `npx`, or entirely in Docker with nothing installed on your machine.
 
 ```mermaid
 flowchart LR
     A["AI assistant<br/>Claude Desktop / Claude Code"]
-    B["mcp-mysql-read-only<br/>one container, whole session"]
+    B["mcp-mysql-read-only<br/>one process, whole session"]
     C[("app_dev")]
     D[("staging")]
     E[("analytics")]
@@ -31,7 +31,7 @@ flowchart LR
     B -.->|"opened at runtime"| F
 ```
 
-The container lives for the whole session, so the active connection is just state inside it. Switching selects a different pool rather than reconnecting, and switching back reuses a warm one.
+The server lives for the whole session, so the active connection is just state inside it. Switching selects a different pool rather than reconnecting, and switching back reuses a warm one.
 
 ---
 
@@ -46,7 +46,7 @@ MYSQL_HOST=127.0.0.1 \
 MYSQL_USER=readonly \
 MYSQL_PASSWORD=secret \
 MYSQL_DATABASE=my_database \
-npx -y mcp-mysql-read-only
+npx -y @shibbirweb/mcp-mysql-read-only
 ```
 
 Requires Node 22 or newer. There is no container in the way, so `127.0.0.1` means what you expect.
@@ -76,7 +76,7 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "mysql": {
       "command": "npx",
-      "args": ["-y", "mcp-mysql-read-only"],
+      "args": ["-y", "@shibbirweb/mcp-mysql-read-only"],
       "env": {
         "MYSQL_HOST": "127.0.0.1",
         "MYSQL_USER": "readonly",
@@ -118,7 +118,7 @@ Same shape, in `.mcp.json` at your project root:
   "mcpServers": {
     "mysql": {
       "command": "npx",
-      "args": ["-y", "mcp-mysql-read-only"],
+      "args": ["-y", "@shibbirweb/mcp-mysql-read-only"],
       "env": {
         "MYSQL_HOST": "127.0.0.1",
         "MYSQL_USER": "readonly",

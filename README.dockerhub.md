@@ -55,7 +55,7 @@ The container lives for the whole session, so the active connection is just stat
 
 ## Supported tags
 
-`1.1.1`, `1.1`, `1`, `latest` — built for `linux/amd64` and `linux/arm64`.
+`1.1.2`, `1.1`, `1`, `latest` — built for `linux/amd64` and `linux/arm64`.
 
 ---
 
