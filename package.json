@@ -1,6 +1,6 @@
 {
   "name": "mcp-mysql-read-only",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A read-only MySQL MCP server whose database and connection can be switched at runtime, with no client restart.",
   "license": "MIT",
   "author": "Md. Shibbir Ahmed <shibbirweb@gmail.com>",
@@ -34,9 +34,9 @@
     "test:integration": "npm run build && node --test test/integration/*.test.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "~1.12.1",
-    "mysql2": "~3.14.0",
-    "zod": "~3.23.8"
+    "@modelcontextprotocol/sdk": "~1.30.0",
+    "mysql2": "~3.24.4",
+    "zod": "~3.25.0"
   },
   "devDependencies": {
     "typescript": "~5.7.2",
