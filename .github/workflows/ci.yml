@@ -149,10 +149,37 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      # The Docker Hub tag list is prose and cannot read package.json, so it is
-      # the one copy of the version a bump can leave behind.
+      # README.dockerhub.md and server.json both carry the version as data and
+      # cannot read package.json, so they are what a bump can leave behind.
       - name: Assert the version is in sync everywhere
         run: node scripts/sync-version.mjs --check
+
+      # The MCP registry verifies ownership by matching server.json against the
+      # published artifacts. A rename on either side is rejected at publish
+      # time, which is after the npm version is already immutable.
+      - name: Assert server.json agrees with package.json
+        run: |
+          node -e '
+            const pkg = require("./package.json");
+            const server = require("./server.json");
+            const npmEntry = server.packages.find((entry) => entry.registryType === "npm");
+            const ociEntry = server.packages.find((entry) => entry.registryType === "oci");
+            const problems = [];
+            if (server.name !== pkg.mcpName) {
+              problems.push(`server.json name ${server.name} != package.json mcpName ${pkg.mcpName}`);
+            }
+            if (!npmEntry || npmEntry.identifier !== pkg.name) {
+              problems.push(`server.json npm identifier ${npmEntry && npmEntry.identifier} != package.json name ${pkg.name}`);
+            }
+            if (!ociEntry) {
+              problems.push("server.json has no oci package entry");
+            }
+            if (problems.length > 0) {
+              console.error("::error::" + problems.join("; "));
+              process.exit(1);
+            }
+            console.log(`server.json agrees with package.json (${server.name})`);
+          '
 
       # Everything below runs against the tarball rather than the working tree,
       # because that is the only artifact npm users ever receive. dist/ is

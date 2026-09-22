@@ -1,0 +1,145 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.shibbirweb/mcp-mysql-read-only",
+  "title": "MySQL (read-only, switchable)",
+  "description": "Read-only MySQL access, with the database and server switchable mid-conversation.",
+  "version": "1.1.4",
+  "websiteUrl": "https://github.com/shibbirweb/mcp-mysql-read-only#readme",
+  "repository": {
+    "url": "https://github.com/shibbirweb/mcp-mysql-read-only",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@shibbirweb/mcp-mysql-read-only",
+      "version": "1.1.4",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "MYSQL_HOST",
+          "description": "Hostname of the MySQL server. Defaults to 127.0.0.1",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_PORT",
+          "description": "Port of the MySQL server. Defaults to 3306",
+          "isRequired": false,
+          "format": "number"
+        },
+        {
+          "name": "MYSQL_USER",
+          "description": "MySQL user. Prefer an account holding only SELECT grants",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_PASSWORD",
+          "description": "Password for MYSQL_USER. Empty when the account has none",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_DATABASE",
+          "description": "Database to open at startup. Can be changed later without restarting",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_PROFILES",
+          "description": "JSON object of named connections to switch between, keyed by profile name",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_DEFAULT_PROFILE",
+          "description": "Which MYSQL_PROFILES entry to start on",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_CONNECT_TIMEOUT_MS",
+          "description": "Connection timeout in milliseconds. Defaults to 10000",
+          "isRequired": false,
+          "format": "number"
+        },
+        {
+          "name": "MYSQL_QUERY_TIMEOUT_MS",
+          "description": "Server-side query timeout in milliseconds. Defaults to 30000",
+          "isRequired": false,
+          "format": "number"
+        }
+      ]
+    },
+    {
+      "registryType": "oci",
+      "identifier": "docker.io/shibbirweb/mcp-mysql-read-only:1.1.4",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "MYSQL_HOST",
+          "description": "Hostname of the MySQL server. Use host.docker.internal to reach the host",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_PORT",
+          "description": "Port of the MySQL server. Defaults to 3306",
+          "isRequired": false,
+          "format": "number"
+        },
+        {
+          "name": "MYSQL_USER",
+          "description": "MySQL user. Prefer an account holding only SELECT grants",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_PASSWORD",
+          "description": "Password for MYSQL_USER. Empty when the account has none",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_DATABASE",
+          "description": "Database to open at startup. Can be changed later without restarting",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_PROFILES",
+          "description": "JSON object of named connections to switch between, keyed by profile name",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_DEFAULT_PROFILE",
+          "description": "Which MYSQL_PROFILES entry to start on",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "MYSQL_CONNECT_TIMEOUT_MS",
+          "description": "Connection timeout in milliseconds. Defaults to 10000",
+          "isRequired": false,
+          "format": "number"
+        },
+        {
+          "name": "MYSQL_QUERY_TIMEOUT_MS",
+          "description": "Server-side query timeout in milliseconds. Defaults to 30000",
+          "isRequired": false,
+          "format": "number"
+        }
+      ]
+    }
+  ]
+}
