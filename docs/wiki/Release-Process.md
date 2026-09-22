@@ -48,15 +48,13 @@ The publish workflow checks both are present and fails with a clear message if n
 
 ### npm publishing
 
-`npm-publish.yml` supports two ways in and picks one automatically.
+`npm-publish.yml` authenticates over OIDC against a trusted publisher. There is no npm token anywhere: not in the repository, not in a secret, not on a maintainer's machine. The workflow declares `id-token: write`, npm exchanges that token for publish rights, and provenance is attached automatically because the package and the repository are both public.
 
-**Trusted publishing (preferred).** npm authenticates the workflow over OIDC, so nothing long-lived is stored in the repository, and provenance is attached automatically for a public package from a public repository. Configure it once on npmjs.com under the package's **Settings → Trusted publishers**, pointing at this repository and `npm-publish.yml`.
+It is configured once on npmjs.com under the package's **Settings → Trusted publishers**, pointing at this repository and `npm-publish.yml`. It must grant the **`npm publish`** permission. A trust configuration created after 3 September 2026 defaults to `npm stage publish` only, which sends releases to a staging area for manual 2FA approval instead of publishing them, and a workflow running `npm publish` against a stage-only configuration is rejected.
 
-**A token (fallback).** Set an `NPM_TOKEN` repository secret with an automation token from npmjs.com. The workflow uses it whenever it is present, and passes `--provenance` explicitly.
+Do not add an `NPM_TOKEN` secret. The workflow no longer reads one, and a token is a long-lived credential that OIDC exists to make unnecessary.
 
-The chicken-and-egg part: a trusted publisher cannot be configured until the package exists on npm, so the very first release has to arrive either by a manual `npm publish` or on the token path. After that, delete `NPM_TOKEN` and the workflow falls back to OIDC on its own.
-
-Both paths need `id-token: write`, which the workflow declares.
+The one-time exception is already behind us: a trusted publisher cannot be configured for a package that does not exist, so 1.1.2 was published by hand to create it. Nothing needs publishing by hand again.
 
 ### Initialise the wiki
 
@@ -68,18 +66,16 @@ If your organisation does not allow `GITHUB_TOKEN` to write the wiki, create a f
 
 ## Cutting a release
 
-1. Bump the version. Never by hand:
+1. On the release branch, bump the version. Never by hand:
    ```bash
-   npm version patch   # or minor, or major
+   npm version patch --no-git-tag-version   # or minor, or major
    ```
-   This writes `package.json` and the lockfile, runs `scripts/sync-version.mjs` to rewrite the tag list in `README.dockerhub.md`, stages that file, commits, and creates the `v` tag.
+   This writes `package.json` and the lockfile, runs `scripts/sync-version.mjs` to rewrite the tag list in `README.dockerhub.md`, and stages that file. Commit it with the rest of the branch.
 2. Merge to `master` with CI green.
-3. Push the tag and publish a GitHub release for it:
-   ```bash
-   git push origin v1.2.3
-   ```
-   Then publish a release for that tag in the GitHub UI.
+3. Publish a GitHub release for the new version, letting GitHub create the tag `v1.2.3` on the merge commit.
 4. `docker-publish.yml` and `npm-publish.yml` both run automatically.
+
+`--no-git-tag-version` matters. Plain `npm version` tags immediately, on the branch commit, which is not the commit that ends up on `master`. The release would then build from a tree `master` never had. Tagging belongs to step 3, after the merge.
 
 ### One version, in one place
 

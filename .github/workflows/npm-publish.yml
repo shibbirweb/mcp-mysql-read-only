@@ -12,8 +12,9 @@ on:
 
 permissions:
   contents: read
-  # Required for npm trusted publishing (OIDC) and for provenance attestation
-  # on the token path. Harmless when neither is in use.
+  # The credential. npm exchanges this OIDC token for publish rights, and it
+  # is also what lets npm attach a provenance attestation, so without it the
+  # publish step has no way to authenticate at all.
   id-token: write
 
 jobs:
@@ -98,25 +99,6 @@ jobs:
 
       - run: npm ci --no-audit --no-fund
 
-      # Two supported ways in, checked here rather than left to fail inside
-      # publish. Trusted publishing is preferred: nothing long-lived is stored
-      # in the repository. The token path exists because a trusted publisher
-      # cannot be configured on npmjs.com until the package exists, so the
-      # first release has to get there some other way.
-      - name: Resolve how to authenticate
-        id: auth
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -n "${NPM_TOKEN:-}" ]; then
-            echo "mode=token" >> "$GITHUB_OUTPUT"
-            echo "Publishing with NPM_TOKEN."
-          else
-            echo "mode=oidc" >> "$GITHUB_OUTPUT"
-            echo "Publishing with trusted publishing (OIDC)."
-          fi
-
       # A re-run of a release that already published would otherwise fail deep
       # inside npm with E403, which reads like a credentials problem.
       - name: Check this version is not already published
@@ -143,17 +125,15 @@ jobs:
             echo "value=latest" >> "$GITHUB_OUTPUT"
           fi
 
+      # No token anywhere: npm authenticates this run over OIDC against the
+      # trusted publisher configured for the package, which must grant the
+      # `npm publish` permission. Provenance is attached automatically for a
+      # public package from a public repository, so --provenance is redundant.
+      #
       # prepack rebuilds dist/ here, which is what makes the tarball
       # self-consistent: dist/ is gitignored, so nothing stale can be shipped.
-      - name: Publish (trusted publishing)
-        if: steps.auth.outputs.mode == 'oidc'
+      - name: Publish
         run: npm publish --access public --tag "${{ steps.disttag.outputs.value }}"
-
-      - name: Publish (token)
-        if: steps.auth.outputs.mode == 'token'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance --tag "${{ steps.disttag.outputs.value }}"
 
       - name: Summary
         run: |
@@ -165,5 +145,5 @@ jobs:
             echo '```'
             echo
             echo "dist-tag: ${{ steps.disttag.outputs.value }}"
-            echo "auth: ${{ steps.auth.outputs.mode }}"
+            echo "auth: trusted publishing (OIDC)"
           } >> "$GITHUB_STEP_SUMMARY"
