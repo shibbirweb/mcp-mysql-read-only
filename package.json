@@ -1,6 +1,6 @@
 {
   "name": "mcp-mysql-read-only",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A read-only MySQL MCP server whose database and connection can be switched at runtime, with no client restart.",
   "license": "MIT",
   "author": "Md. Shibbir Ahmed <shibbirweb@gmail.com>",
