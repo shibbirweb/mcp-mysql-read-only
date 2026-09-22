@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml/badge.svg)](https://github.com/shibbirweb/mcp-mysql-read-only/actions/workflows/ci.yml)
 [![M8ven Verified](https://m8ven.ai/badge/mcp/shibbirweb-mcp-mysql-read-only-1rny1r?variant=verified)](https://m8ven.ai/mcp/shibbirweb-mcp-mysql-read-only-1rny1r)
+[![npm](https://img.shields.io/npm/v/mcp-mysql-read-only?label=npm&color=cb3837)](https://www.npmjs.com/package/mcp-mysql-read-only)
+[![npm downloads](https://img.shields.io/npm/dm/mcp-mysql-read-only?style=flat&label=npm%20downloads)](https://www.npmjs.com/package/mcp-mysql-read-only)
 [![Docker Hub](https://img.shields.io/docker/v/shibbirweb/mcp-mysql-read-only?label=docker%20hub&sort=semver)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only)
 [![Docker pulls](https://img.shields.io/docker/pulls/shibbirweb/mcp-mysql-read-only?style=flat)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only)
 [![Image size](https://img.shields.io/docker/image-size/shibbirweb/mcp-mysql-read-only/latest?style=flat&label=image%20size)](https://hub.docker.com/r/shibbirweb/mcp-mysql-read-only/tags)
@@ -35,6 +37,22 @@ The container lives for the whole session, so the active connection is just stat
 
 ## Quick start
 
+Two ways to run it. npm is the shorter setup; Docker keeps the server inside a container.
+
+### npm
+
+```bash
+MYSQL_HOST=127.0.0.1 \
+MYSQL_USER=readonly \
+MYSQL_PASSWORD=secret \
+MYSQL_DATABASE=my_database \
+npx -y mcp-mysql-read-only
+```
+
+Requires Node 22 or newer. There is no container in the way, so `127.0.0.1` means what you expect.
+
+### Docker
+
 ```bash
 docker run -i --rm \
   --add-host host.docker.internal:host-gateway \
@@ -47,9 +65,30 @@ docker run -i --rm \
 
 Use `host.docker.internal` to reach a MySQL running on the same machine as Docker. Inside the container, `localhost` means the container itself.
 
+The container is the more isolated of the two: the server runs with only what the image and the environment give it. Over npm it runs directly on your machine with your user's access. Both enforce the same read-only guarantee.
+
 ### Claude Desktop
 
 Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mysql": {
+      "command": "npx",
+      "args": ["-y", "mcp-mysql-read-only"],
+      "env": {
+        "MYSQL_HOST": "127.0.0.1",
+        "MYSQL_USER": "readonly",
+        "MYSQL_PASSWORD": "secret",
+        "MYSQL_DATABASE": "my_database"
+      }
+    }
+  }
+}
+```
+
+Or the same server in Docker:
 
 ```json
 {
@@ -78,20 +117,20 @@ Same shape, in `.mcp.json` at your project root:
 {
   "mcpServers": {
     "mysql": {
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm",
-        "--add-host", "host.docker.internal:host-gateway",
-        "-e", "MYSQL_HOST=host.docker.internal",
-        "-e", "MYSQL_USER=readonly",
-        "-e", "MYSQL_PASSWORD=secret",
-        "-e", "MYSQL_DATABASE=my_database",
-        "shibbirweb/mcp-mysql-read-only"
-      ]
+      "command": "npx",
+      "args": ["-y", "mcp-mysql-read-only"],
+      "env": {
+        "MYSQL_HOST": "127.0.0.1",
+        "MYSQL_USER": "readonly",
+        "MYSQL_PASSWORD": "secret",
+        "MYSQL_DATABASE": "my_database"
+      }
     }
   }
 }
 ```
+
+Either form from the Claude Desktop section works here too.
 
 Restart the client once. After that you never need to restart it to change database.
 
