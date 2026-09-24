@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
+import type { ToolHints } from "../BaseTool.js";
 import { DatabaseScopedTool } from "../DatabaseScopedTool.js";
 import { QueryExecutor } from "../../database/QueryExecutor.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
@@ -18,6 +19,14 @@ export class GetTableSampleTool extends DatabaseScopedTool<GetTableSampleArgs> {
 
   private static readonly MIN_LIMIT = 1;
   private static readonly MAX_LIMIT = 50;
+
+  public readonly annotations: ToolHints = {
+    title: "Get Table Sample",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
 
   public readonly inputSchema: ZodRawShape = {
     table: z.string().describe("Table name"),

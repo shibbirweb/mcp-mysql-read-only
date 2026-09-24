@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
+import type { ToolHints } from "../BaseTool.js";
 import { DatabaseScopedTool } from "../DatabaseScopedTool.js";
 import { QueryExecutor } from "../../database/QueryExecutor.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
@@ -14,6 +15,14 @@ interface DescribeTableArgs extends DatabaseScopedArgs {
 export class DescribeTableTool extends DatabaseScopedTool<DescribeTableArgs> {
   public readonly name = "describe_table";
   public readonly description = "Show columns and schema for a specific table";
+
+  public readonly annotations: ToolHints = {
+    title: "Describe Table",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
 
   public readonly inputSchema: ZodRawShape = {
     table: z.string().describe("Table name"),

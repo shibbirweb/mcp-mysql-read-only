@@ -47,7 +47,7 @@ These are the things the project exists to guarantee. Do not weaken them to make
 One class per tool, in its own file named after the class, holding its name, description, input schema and implementation together. Extend `BaseTool`, or `DatabaseScopedTool` when the tool accepts the per-call `database` override, and register it in `ApplicationFactory`.
 
 - Implement `execute` (or `read` for a database-scoped tool). Never override `register` or `invoke`: the base class is what makes the error contract impossible to forget.
-- Declare **all four** annotations explicitly, including the two the specification treats as meaningful only when `readOnlyHint` is false. An omitted hint cannot be told apart from an unconsidered one. CI fails a tool that declares fewer than four.
+- Declare `annotations` in the tool's own class, typed `ToolHints`: a human-readable `title` plus **all four** hints, including the two the specification treats as meaningful only when `readOnlyHint` is false. An omitted hint cannot be told apart from an unconsidered one. There is deliberately no default in `BaseTool`, because directory scanners read each tool's source and report an inherited hint as missing. The type makes an omission a compile error, and CI fails a tool whose handshake lacks a title or any hint.
 - The description is written for a model, not a person. State what the tool does and stop. No instructions about unrelated actions, no hidden text, nothing that steers the assistant beyond choosing the right tool. `PRIVACY.md` makes this a public claim.
 - Keep the description honest about capability. If it says read, it must not mutate.
 

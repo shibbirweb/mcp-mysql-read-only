@@ -251,9 +251,10 @@ jobs:
           version=$(node -p "require('/tmp/consumer/node_modules/@shibbirweb/mcp-mysql-read-only/package.json').version")
           echo "$output" | grep -q "\"version\":\"$version\""
 
-          # Every tool states all four hints. A partial set is what directories
-          # and auditors flag, because an omitted hint cannot be told apart
-          # from one nobody considered.
+          # Every tool states all four hints and a title. A partial set is what
+          # directories and auditors flag, because an omitted hint cannot be
+          # told apart from one nobody considered, and a tool without a title
+          # is shown to users by its snake_case name.
           echo "$output" > /tmp/tools.jsonl
           node -e '
             const lines = require("fs").readFileSync("/tmp/tools.jsonl", "utf8").trim().split("\n");
@@ -266,5 +267,12 @@ jobs:
               console.error("::error::Tools missing explicit hints: " + incomplete.map((t) => t.name).join(", "));
               process.exit(1);
             }
-            console.log(`all ${listing.result.tools.length} tools declare all four hints`);
+            const untitled = listing.result.tools.filter(
+              (tool) => !(tool.annotations || {}).title || !tool.title
+            );
+            if (untitled.length > 0) {
+              console.error("::error::Tools missing a title: " + untitled.map((t) => t.name).join(", "));
+              process.exit(1);
+            }
+            console.log(`all ${listing.result.tools.length} tools declare a title and all four hints`);
           '

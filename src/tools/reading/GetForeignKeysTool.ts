@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
+import type { ToolHints } from "../BaseTool.js";
 import { DatabaseScopedTool } from "../DatabaseScopedTool.js";
 import { QueryExecutor } from "../../database/QueryExecutor.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
@@ -23,6 +24,14 @@ export class GetForeignKeysTool extends DatabaseScopedTool<GetForeignKeysArgs> {
   private static readonly QUERY = `SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, CONSTRAINT_NAME
            FROM information_schema.KEY_COLUMN_USAGE
            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL`;
+
+  public readonly annotations: ToolHints = {
+    title: "Get Foreign Keys",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
 
   public readonly inputSchema: ZodRawShape = {
     table: z.string().describe("Table name"),

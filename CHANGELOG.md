@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 Where a version reached one distribution channel but not another, the entry says so.
 
+## [1.1.6] - Unreleased
+
+### Added
+
+- A human-readable title on every tool (for example "Run Read-Only Query" for `run_query`), sent both as the tool's `title` and as `annotations.title`, so clients show a label instead of the snake_case name.
+- CI asserts that every tool carries a title, alongside the existing check for all four hints.
+
+### Changed
+
+- Each tool now states its own four capability hints in its own class instead of nine of them inheriting a default from `BaseTool`. The values sent to clients are unchanged. The inherited default was correct on the wire but invisible in each tool's source, which is what source-reading directory scanners check, so they reported every hint as missing. A missing hint or title is now a compile error.
+
 ## [1.1.5] - Unreleased
 
 ### Added
@@ -88,7 +99,8 @@ Initial release, distributed as a Docker image for `linux/amd64` and `linux/arm6
 - Named connections through `MYSQL_PROFILES`, with a per-call `database` override on every reading tool so comparing two schemas does not require switching and switching back.
 - One connection pool per target, cached by connection identity, so switching selects a different pool rather than reconnecting and switching back reuses a warm one.
 
-[1.1.5]: https://github.com/shibbirweb/mcp-mysql-read-only/compare/v1.1.4...HEAD
+[1.1.6]: https://github.com/shibbirweb/mcp-mysql-read-only/compare/v1.1.5...HEAD
+[1.1.5]: https://github.com/shibbirweb/mcp-mysql-read-only/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/shibbirweb/mcp-mysql-read-only/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/shibbirweb/mcp-mysql-read-only/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/shibbirweb/mcp-mysql-read-only/compare/v1.1.1...v1.1.2

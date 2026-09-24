@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
-import { BaseTool } from "../BaseTool.js";
+import { BaseTool, type ToolHints } from "../BaseTool.js";
 import { ConnectionManager } from "../../connections/ConnectionManager.js";
 import { QueryExecutor } from "../../database/QueryExecutor.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
@@ -26,6 +26,14 @@ export class ListDatabasesTool extends BaseTool<ListDatabasesArgs> {
     "mysql",
     "sys",
   ]);
+
+  public readonly annotations: ToolHints = {
+    title: "List Databases",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
 
   public readonly inputSchema: ZodRawShape = {
     include_system: z

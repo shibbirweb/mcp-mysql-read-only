@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
+import type { ToolHints } from "../BaseTool.js";
 import { DatabaseScopedTool } from "../DatabaseScopedTool.js";
 import { QueryExecutor } from "../../database/QueryExecutor.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
@@ -14,6 +15,14 @@ interface GetTableIndexesArgs extends DatabaseScopedArgs {
 export class GetTableIndexesTool extends DatabaseScopedTool<GetTableIndexesArgs> {
   public readonly name = "get_table_indexes";
   public readonly description = "Show indexes for a specific table";
+
+  public readonly annotations: ToolHints = {
+    title: "Get Table Indexes",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
 
   public readonly inputSchema: ZodRawShape = {
     table: z.string().describe("Table name"),

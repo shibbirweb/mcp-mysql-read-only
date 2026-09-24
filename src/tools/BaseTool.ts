@@ -5,6 +5,21 @@ import { ToolResponse } from "../formatting/ToolResponse.js";
 import type { ToolResult } from "../types/tool.types.js";
 
 /**
+ * The annotations every tool must declare, with nothing optional.
+ *
+ * The SDK's `ToolAnnotations` makes every field optional, because the
+ * specification does. This project does not: a human-readable `title` and all
+ * four hints are required, since the OpenAI directory rejects a tool missing
+ * any hint and a client falls back to the raw snake_case name without a title.
+ */
+export type ToolHints = Required<
+  Pick<
+    ToolAnnotations,
+    "title" | "readOnlyHint" | "destructiveHint" | "idempotentHint" | "openWorldHint"
+  >
+>;
+
+/**
  * Template Method base for every tool.
  *
  * `register` and `invoke` are fixed; subclasses supply only `execute`. That
@@ -30,13 +45,12 @@ export abstract class BaseTool<TArgs = Record<string, unknown>> {
   /**
    * What the client is allowed to assume before it runs the call.
    *
-   * The default is the whole point of this server: every reading tool is
-   * incapable of changing anything, so a client may run it without stopping to
-   * ask. `ReadOnlyQueryValidator` is what makes that true; this is what says so
-   * out loud, and a client that never hears it has to treat `run_query` as if
-   * it might drop a table.
+   * Every reading tool is incapable of changing anything, so a client may run
+   * it without stopping to ask. `ReadOnlyQueryValidator` is what makes that
+   * true; this is what says so out loud, and a client that never hears it has
+   * to treat `run_query` as if it might drop a table.
    *
-   * `openWorldHint` stays true throughout because the answers come from a MySQL
+   * `openWorldHint` is true throughout because the answers come from a MySQL
    * server, not from a closed set this process controls.
    *
    * All four hints are stated explicitly, including the two the specification
@@ -46,14 +60,15 @@ export abstract class BaseTool<TArgs = Record<string, unknown>> {
    * from "nobody said". Spelling out the redundant pair costs two lines and
    * removes that ambiguity.
    *
-   * Overridden only by the three tools that repoint the connection.
+   * Abstract, with no default. This used to be a default here that nine tools
+   * inherited, which was correct on the wire but invisible in each tool's own
+   * file: directory scanners that read source (M8ven among them) reported
+   * all twelve tools as missing every hint. Each tool now states its own four
+   * next to its name, so the file a reviewer opens is the whole answer, and the
+   * `ToolHints` type makes leaving one out a compile error rather than a CI
+   * failure.
    */
-  public readonly annotations: ToolAnnotations = {
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: true,
-  };
+  public abstract readonly annotations: ToolHints;
 
   protected abstract execute(args: TArgs): Promise<ToolResult>;
 
@@ -67,6 +82,9 @@ export abstract class BaseTool<TArgs = Record<string, unknown>> {
     server.registerTool(
       this.name,
       {
+        // Sent at the top level as well as inside the annotations: newer
+        // clients read the top-level field, older ones only the annotation.
+        title: this.annotations.title,
         description: this.description,
         inputSchema: this.inputSchema,
         annotations: this.annotations,
