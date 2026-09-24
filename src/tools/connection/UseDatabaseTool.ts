@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
-import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { BaseTool } from "../BaseTool.js";
+import { BaseTool, type ToolHints } from "../BaseTool.js";
 import { ConnectionManager } from "../../connections/ConnectionManager.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
 import { IdentifierValidator } from "../../validation/IdentifierValidator.js";
@@ -32,7 +31,8 @@ export class UseDatabaseTool extends BaseTool<UseDatabaseArgs> {
    * the database is touched, and switching twice to the same name leaves the
    * same state, hence not destructive and idempotent.
    */
-  public readonly annotations: ToolAnnotations = {
+  public readonly annotations: ToolHints = {
+    title: "Switch Database",
     readOnlyHint: false,
     destructiveHint: false,
     idempotentHint: true,

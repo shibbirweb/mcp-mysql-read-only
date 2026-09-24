@@ -1,5 +1,5 @@
 import type { ZodRawShape } from "zod";
-import { BaseTool } from "../BaseTool.js";
+import { BaseTool, type ToolHints } from "../BaseTool.js";
 import { ConnectionManager } from "../../connections/ConnectionManager.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
 import type { ToolResult } from "../../types/tool.types.js";
@@ -9,6 +9,15 @@ export class CurrentConnectionTool extends BaseTool {
   public readonly name = "current_connection";
   public readonly description =
     "Show which MySQL server and database the read-only tools are currently pointed at";
+
+  public readonly annotations: ToolHints = {
+    title: "Show Current Connection",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
+
   public readonly inputSchema: ZodRawShape = {};
 
   constructor(private readonly connections: ConnectionManager) {

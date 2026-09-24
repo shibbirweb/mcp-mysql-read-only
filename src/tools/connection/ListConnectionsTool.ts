@@ -1,5 +1,5 @@
 import type { ZodRawShape } from "zod";
-import { BaseTool } from "../BaseTool.js";
+import { BaseTool, type ToolHints } from "../BaseTool.js";
 import { ConnectionManager } from "../../connections/ConnectionManager.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
 import type { ToolResult } from "../../types/tool.types.js";
@@ -14,6 +14,15 @@ export class ListConnectionsTool extends BaseTool {
   public readonly name = "list_connections";
   public readonly description =
     "List the connection profiles available to switch to, including any added during this session";
+
+  public readonly annotations: ToolHints = {
+    title: "List Connection Profiles",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
+
   public readonly inputSchema: ZodRawShape = {};
 
   constructor(private readonly connections: ConnectionManager) {

@@ -1,4 +1,5 @@
 import type { ZodRawShape } from "zod";
+import type { ToolHints } from "../BaseTool.js";
 import { DatabaseScopedTool } from "../DatabaseScopedTool.js";
 import { QueryExecutor } from "../../database/QueryExecutor.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
@@ -9,6 +10,14 @@ import type { DatabaseScopedArgs, ToolResult } from "../../types/tool.types.js";
 export class ListTablesTool extends DatabaseScopedTool {
   public readonly name = "list_tables";
   public readonly description = "List all tables in the active database";
+
+  public readonly annotations: ToolHints = {
+    title: "List Tables",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
 
   public readonly inputSchema: ZodRawShape = {
     database: DatabaseScopedTool.databaseParam,

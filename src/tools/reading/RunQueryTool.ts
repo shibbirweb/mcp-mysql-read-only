@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
+import type { ToolHints } from "../BaseTool.js";
 import { DatabaseScopedTool } from "../DatabaseScopedTool.js";
 import { QueryExecutor } from "../../database/QueryExecutor.js";
 import { RowFormatter } from "../../formatting/RowFormatter.js";
@@ -24,6 +25,14 @@ export class RunQueryTool extends DatabaseScopedTool<RunQueryArgs> {
   public readonly name = "run_query";
   public readonly description =
     "Execute a read-only SQL query (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN only) against the active connection";
+
+  public readonly annotations: ToolHints = {
+    title: "Run Read-Only Query",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  };
 
   public readonly inputSchema: ZodRawShape = {
     query: z.string().describe("SQL query to execute"),

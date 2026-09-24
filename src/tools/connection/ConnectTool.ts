@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
-import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { BaseTool } from "../BaseTool.js";
+import { BaseTool, type ToolHints } from "../BaseTool.js";
 import { ConnectionManager } from "../../connections/ConnectionManager.js";
 import { ConnectionTargetFactory } from "../../connections/ConnectionTargetFactory.js";
 import { ToolResponse } from "../../formatting/ToolResponse.js";
@@ -33,7 +32,8 @@ export class ConnectTool extends BaseTool<ConnectArgs> {
    * Not destructive either, because nothing in any database changes, and
    * re-running the same call lands on the same connection.
    */
-  public readonly annotations: ToolAnnotations = {
+  public readonly annotations: ToolHints = {
+    title: "Connect to MySQL Server",
     readOnlyHint: false,
     destructiveHint: false,
     idempotentHint: true,

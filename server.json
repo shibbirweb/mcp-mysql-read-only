@@ -3,7 +3,7 @@
   "name": "io.github.shibbirweb/mcp-mysql-read-only",
   "title": "MySQL (read-only, switchable)",
   "description": "Read-only MySQL access, with the database and server switchable mid-conversation.",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "websiteUrl": "https://github.com/shibbirweb/mcp-mysql-read-only#readme",
   "repository": {
     "url": "https://github.com/shibbirweb/mcp-mysql-read-only",
@@ -13,7 +13,7 @@
     {
       "registryType": "npm",
       "identifier": "@shibbirweb/mcp-mysql-read-only",
-      "version": "1.1.5",
+      "version": "1.1.6",
       "transport": {
         "type": "stdio"
       },
@@ -78,7 +78,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "docker.io/shibbirweb/mcp-mysql-read-only:1.1.5",
+      "identifier": "docker.io/shibbirweb/mcp-mysql-read-only:1.1.6",
       "transport": {
         "type": "stdio"
       },
